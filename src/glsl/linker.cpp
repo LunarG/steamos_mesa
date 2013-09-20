@@ -839,7 +839,7 @@ interstage_cross_validate_uniform_blocks(struct gl_shader_program *prog)
 /**
  * Populates a shaders symbol table with all global declarations
  */
-static void
+void
 populate_symbol_table(gl_shader *sh)
 {
    sh->symbols = new(sh) glsl_symbol_table;

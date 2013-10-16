@@ -229,6 +229,14 @@ public:
    }
 
    /**
+    * Runs a passed callback for the hash
+    */
+   void iterate(void (*func)(const void *, void *, void *), void *closure)
+   {
+      hash_table_call_foreach(this->ht, func, closure);
+   }
+
+   /**
     * Get the value associated with a particular key
     *
     * \return

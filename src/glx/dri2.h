@@ -94,5 +94,8 @@ dri2_query_renderer_integer(struct glx_screen *base, int attribute,
 _X_HIDDEN int
 dri2_query_renderer_string(struct glx_screen *base, int attribute,
                            const char **value);
+_X_HIDDEN void
+DRI2SwapBuffers(Display *dpy, XID drawable, CARD64 target_msc, CARD64 divisor,
+		CARD64 remainder, CARD64 *count);
 
 #endif

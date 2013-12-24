@@ -98,6 +98,9 @@ _X_HIDDEN void
 DRI2SwapBuffers(Display *dpy, XID drawable, CARD64 target_msc, CARD64 divisor,
 		CARD64 remainder, CARD64 *count);
 
+extern Bool
+DRI2GetMSC(Display *dpy, XID drawable, CARD64 *ust, CARD64 *msc, CARD64 *sbc);
+
 extern void
 DRI2SwapInterval(Display *dpy, XID drawable, int interval);
 

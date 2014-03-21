@@ -524,8 +524,10 @@ _mesa_shader_stage_to_string(unsigned stage);
 extern int glcpp_preprocess(void *ctx, const char **shader, char **info_log,
                       const struct gl_extensions *extensions, struct gl_context *gl_ctx);
 
+extern void _mesa_create_shader_compiler(void);
 extern void _mesa_destroy_shader_compiler(void);
 extern void _mesa_destroy_shader_compiler_caches(void);
+
 
 #ifdef __cplusplus
 }

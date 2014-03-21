@@ -2798,7 +2798,7 @@ struct gl_shader_program
 #define GLSL_USE_PROG 0x80  /**< Log glUseProgram calls */
 #define GLSL_REPORT_ERRORS 0x100  /**< Print compilation errors */
 #define GLSL_DUMP_ON_ERROR 0x200 /**< Dump shaders to stderr on compile error */
-
+#define GLSL_USE_GLASS     0x400 /**< Use LunarGlass optimizer */
 
 /**
  * Context state for GLSL vertex/fragment shaders.
@@ -3356,6 +3356,20 @@ struct gl_constants
     * as if they began with "#version ForceGLSLVersion".
     */
    GLuint ForceGLSLVersion;
+
+   /**
+    * LunarGlass optimizer mode:
+    * 0 = never use (force disable)
+    * 1 = use driver whitelist
+    * 2 = always use (force enable)
+    */
+   GLuint GlassMode;
+
+   /**
+    * LunarGlass optimization flags:
+    * This is just one for now, but more should be added.
+    */
+   GLboolean GlassEnableReassociation;
 
    /**
     * Does the driver support real 32-bit integers?  (Otherwise, integers are
@@ -4339,6 +4353,10 @@ enum _debug
    DEBUG_INCOMPLETE_FBO         = (1 << 3)
 };
 
+
+#define DRI_CONF_GLASS_MODE_NEVER 0
+#define DRI_CONF_GLASS_MODE_WHITELIST 1
+#define DRI_CONF_GLASS_MODE_ALWAYS 2
 
 
 #ifdef __cplusplus

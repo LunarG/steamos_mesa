@@ -50,6 +50,7 @@ extern "C" {
 #include "main/uniforms.h"
 #include "brw_fs_live_variables.h"
 #include "glsl/glsl_types.h"
+#include "glsl/glsl_parser_extras.h"
 
 void
 fs_inst::init()
@@ -2639,13 +2640,36 @@ fs_visitor::dump_instructions()
 {
    calculate_register_pressure();
 
-   int ip = 0, max_pressure = 0;
+   int ip = 0, max_pressure = 0, indent = 0;;
    foreach_list(node, &this->instructions) {
       backend_instruction *inst = (backend_instruction *)node;
+
       max_pressure = MAX2(max_pressure, regs_live_at_ip[ip]);
+
+      switch (inst->opcode) {
+      case BRW_OPCODE_DO:    
+      case BRW_OPCODE_IF:    break;
+      case BRW_OPCODE_ELSE:  
+      case BRW_OPCODE_ENDIF: --indent; break;
+      case BRW_OPCODE_WHILE: --indent; break;
+      default: break;
+      }
+
       fprintf(stderr, "{%3d} %4d: ", regs_live_at_ip[ip], ip);
-      dump_instruction(inst);
+      for (int i=0; i<indent*4; ++i)
+         fprintf(stderr, " ");
+
+      dump_instruction(inst, stderr);
       ++ip;
+
+      switch (inst->opcode) {
+      case BRW_OPCODE_DO:    
+      case BRW_OPCODE_IF:    
+      case BRW_OPCODE_ELSE:  ++indent; break;
+      case BRW_OPCODE_WHILE: 
+      case BRW_OPCODE_ENDIF: break;
+      default: break;
+      }
    }
    fprintf(stderr, "Maximum %3d registers live at once.\n", max_pressure);
 }
@@ -2653,182 +2677,198 @@ fs_visitor::dump_instructions()
 void
 fs_visitor::dump_instruction(backend_instruction *be_inst)
 {
+   dump_instruction(be_inst, stderr);
+}
+
+void
+fs_visitor::dump_instruction(backend_instruction *be_inst, FILE *file)
+{
+   char buff[256];
+   dump_instruction(be_inst, buff);
+
+   fprintf(file, "%s", buff);
+
+   fprintf(file, "\n");
+}
+
+void
+fs_visitor::dump_instruction(backend_instruction *be_inst, char* string)
+{
    fs_inst *inst = (fs_inst *)be_inst;
 
    if (inst->predicate) {
-      fprintf(stderr, "(%cf0.%d) ",
+      string += sprintf(string, "(%cf0.%d) ",
              inst->predicate_inverse ? '-' : '+',
              inst->flag_subreg);
    }
 
-   fprintf(stderr, "%s", brw_instruction_name(inst->opcode));
+   string += sprintf(string, "%s", brw_instruction_name(inst->opcode));
    if (inst->saturate)
-      fprintf(stderr, ".sat");
+      string += sprintf(string, ".sat");
    if (inst->conditional_mod) {
-      fprintf(stderr, "%s", conditional_modifier[inst->conditional_mod]);
+      string += sprintf(string, "%s", conditional_modifier[inst->conditional_mod]);
       if (!inst->predicate &&
           (brw->gen < 5 || (inst->opcode != BRW_OPCODE_SEL &&
                               inst->opcode != BRW_OPCODE_IF &&
                               inst->opcode != BRW_OPCODE_WHILE))) {
-         fprintf(stderr, ".f0.%d", inst->flag_subreg);
+         string += sprintf(string, ".f0.%d", inst->flag_subreg);
       }
    }
-   fprintf(stderr, " ");
+   string += sprintf(string, " ");
 
 
    switch (inst->dst.file) {
    case GRF:
-      fprintf(stderr, "vgrf%d", inst->dst.reg);
+      string += sprintf(string, "vgrf%d", inst->dst.reg);
       if (virtual_grf_sizes[inst->dst.reg] != 1 ||
           inst->dst.subreg_offset)
-         fprintf(stderr, "+%d.%d",
+         string += sprintf(string, "+%d.%d",
                  inst->dst.reg_offset, inst->dst.subreg_offset);
       break;
    case MRF:
-      fprintf(stderr, "m%d", inst->dst.reg);
+      string += sprintf(string, "m%d", inst->dst.reg);
       break;
    case BAD_FILE:
-      fprintf(stderr, "(null)");
+      string += sprintf(string, "(null)");
       break;
    case UNIFORM:
-      fprintf(stderr, "***u%d***", inst->dst.reg + inst->dst.reg_offset);
+      string += sprintf(string, "***u%d***", inst->dst.reg + inst->dst.reg_offset);
       break;
    case HW_REG:
       if (inst->dst.fixed_hw_reg.file == BRW_ARCHITECTURE_REGISTER_FILE) {
          switch (inst->dst.fixed_hw_reg.nr) {
          case BRW_ARF_NULL:
-            fprintf(stderr, "null");
+            string += sprintf(string, "null");
             break;
          case BRW_ARF_ADDRESS:
-            fprintf(stderr, "a0.%d", inst->dst.fixed_hw_reg.subnr);
+            string += sprintf(string, "a0.%d", inst->dst.fixed_hw_reg.subnr);
             break;
          case BRW_ARF_ACCUMULATOR:
-            fprintf(stderr, "acc%d", inst->dst.fixed_hw_reg.subnr);
+            string += sprintf(string, "acc%d", inst->dst.fixed_hw_reg.subnr);
             break;
          case BRW_ARF_FLAG:
-            fprintf(stderr, "f%d.%d", inst->dst.fixed_hw_reg.nr & 0xf,
+            string += sprintf(string, "f%d.%d", inst->dst.fixed_hw_reg.nr & 0xf,
                              inst->dst.fixed_hw_reg.subnr);
             break;
          default:
-            fprintf(stderr, "arf%d.%d", inst->dst.fixed_hw_reg.nr & 0xf,
+            string += sprintf(string, "arf%d.%d", inst->dst.fixed_hw_reg.nr & 0xf,
                                inst->dst.fixed_hw_reg.subnr);
             break;
          }
       } else {
-         fprintf(stderr, "hw_reg%d", inst->dst.fixed_hw_reg.nr);
+         string += sprintf(string, "hw_reg%d", inst->dst.fixed_hw_reg.nr);
       }
       if (inst->dst.fixed_hw_reg.subnr)
-         fprintf(stderr, "+%d", inst->dst.fixed_hw_reg.subnr);
+         string += sprintf(string, "+%d", inst->dst.fixed_hw_reg.subnr);
       break;
    default:
-      fprintf(stderr, "???");
+      string += sprintf(string, "???");
       break;
    }
-   fprintf(stderr, ":%s, ", brw_reg_type_letters(inst->dst.type));
+   string += sprintf(string, ":%s, ", brw_reg_type_letters(inst->dst.type));
 
    for (int i = 0; i < 3 && inst->src[i].file != BAD_FILE; i++) {
       if (inst->src[i].negate)
-         fprintf(stderr, "-");
+         string += sprintf(string, "-");
       if (inst->src[i].abs)
-         fprintf(stderr, "|");
+         string += sprintf(string, "|");
       switch (inst->src[i].file) {
       case GRF:
-         fprintf(stderr, "vgrf%d", inst->src[i].reg);
+         string += sprintf(string, "vgrf%d", inst->src[i].reg);
          if (virtual_grf_sizes[inst->src[i].reg] != 1 ||
              inst->src[i].subreg_offset)
-            fprintf(stderr, "+%d.%d", inst->src[i].reg_offset,
+            string += sprintf(string, "+%d.%d", inst->src[i].reg_offset,
                     inst->src[i].subreg_offset);
          break;
       case MRF:
-         fprintf(stderr, "***m%d***", inst->src[i].reg);
+         string += sprintf(string, "***m%d***", inst->src[i].reg);
          break;
       case UNIFORM:
-         fprintf(stderr, "u%d", inst->src[i].reg + inst->src[i].reg_offset);
+         string += sprintf(string, "u%d", inst->src[i].reg + inst->src[i].reg_offset);
          if (inst->src[i].reladdr) {
-            fprintf(stderr, "+reladdr");
+            string += sprintf(string, "+reladdr");
          } else if (virtual_grf_sizes[inst->src[i].reg] != 1 ||
              inst->src[i].subreg_offset) {
-            fprintf(stderr, "+%d.%d", inst->src[i].reg_offset,
+            string += sprintf(string, "+%d.%d", inst->src[i].reg_offset,
                     inst->src[i].subreg_offset);
          }
          break;
       case BAD_FILE:
-         fprintf(stderr, "(null)");
+         string += sprintf(string, "(null)");
          break;
       case IMM:
          switch (inst->src[i].type) {
          case BRW_REGISTER_TYPE_F:
-            fprintf(stderr, "%ff", inst->src[i].imm.f);
+            string += sprintf(string, "%ff", inst->src[i].imm.f);
             break;
          case BRW_REGISTER_TYPE_D:
-            fprintf(stderr, "%dd", inst->src[i].imm.i);
+            string += sprintf(string, "%dd", inst->src[i].imm.i);
             break;
          case BRW_REGISTER_TYPE_UD:
-            fprintf(stderr, "%uu", inst->src[i].imm.u);
+            string += sprintf(string, "%uu", inst->src[i].imm.u);
             break;
          default:
-            fprintf(stderr, "???");
+            string += sprintf(string, "???");
             break;
          }
          break;
       case HW_REG:
          if (inst->src[i].fixed_hw_reg.negate)
-            fprintf(stderr, "-");
+            string += sprintf(string, "-");
          if (inst->src[i].fixed_hw_reg.abs)
-            fprintf(stderr, "|");
+            string += sprintf(string, "|");
          if (inst->src[i].fixed_hw_reg.file == BRW_ARCHITECTURE_REGISTER_FILE) {
             switch (inst->src[i].fixed_hw_reg.nr) {
             case BRW_ARF_NULL:
-               fprintf(stderr, "null");
+               string += sprintf(string, "null");
                break;
             case BRW_ARF_ADDRESS:
-               fprintf(stderr, "a0.%d", inst->src[i].fixed_hw_reg.subnr);
+               string += sprintf(string, "a0.%d", inst->src[i].fixed_hw_reg.subnr);
                break;
             case BRW_ARF_ACCUMULATOR:
-               fprintf(stderr, "acc%d", inst->src[i].fixed_hw_reg.subnr);
+               string += sprintf(string, "acc%d", inst->src[i].fixed_hw_reg.subnr);
                break;
             case BRW_ARF_FLAG:
-               fprintf(stderr, "f%d.%d", inst->src[i].fixed_hw_reg.nr & 0xf,
+               string += sprintf(string, "f%d.%d", inst->src[i].fixed_hw_reg.nr & 0xf,
                                 inst->src[i].fixed_hw_reg.subnr);
                break;
             default:
-               fprintf(stderr, "arf%d.%d", inst->src[i].fixed_hw_reg.nr & 0xf,
+               string += sprintf(string, "arf%d.%d", inst->src[i].fixed_hw_reg.nr & 0xf,
                                   inst->src[i].fixed_hw_reg.subnr);
                break;
             }
          } else {
-            fprintf(stderr, "hw_reg%d", inst->src[i].fixed_hw_reg.nr);
+            string += sprintf(string, "hw_reg%d", inst->src[i].fixed_hw_reg.nr);
          }
          if (inst->src[i].fixed_hw_reg.subnr)
-            fprintf(stderr, "+%d", inst->src[i].fixed_hw_reg.subnr);
+            string += sprintf(string, "+%d", inst->src[i].fixed_hw_reg.subnr);
          if (inst->src[i].fixed_hw_reg.abs)
-            fprintf(stderr, "|");
+            string += sprintf(string, "|");
          break;
       default:
-         fprintf(stderr, "???");
+         string += sprintf(string, "???");
          break;
       }
       if (inst->src[i].abs)
-         fprintf(stderr, "|");
+         string += sprintf(string, "|");
 
       if (inst->src[i].file != IMM) {
-         fprintf(stderr, ":%s", brw_reg_type_letters(inst->src[i].type));
+         string += sprintf(string, ":%s", brw_reg_type_letters(inst->src[i].type));
       }
 
       if (i < 2 && inst->src[i + 1].file != BAD_FILE)
-         fprintf(stderr, ", ");
+         string += sprintf(string, ", ");
    }
 
-   fprintf(stderr, " ");
+   string += sprintf(string, " ");
 
    if (inst->force_uncompressed)
-      fprintf(stderr, "1sthalf ");
+      string += sprintf(string, "1sthalf ");
 
    if (inst->force_sechalf)
-      fprintf(stderr, "2ndhalf ");
-
-   fprintf(stderr, "\n");
+      string += sprintf(string, "2ndhalf ");
 }
+
 
 /**
  * Possibly returns an instruction that set up @param reg.
@@ -2947,11 +2987,11 @@ fs_visitor::assign_binding_table_offsets()
    assign_common_binding_table_offsets(next_binding_table_offset);
 }
 
-void
-fs_visitor::calculate_register_pressure()
+int
+fs_visitor::calculate_register_pressure(int extra)
 {
    invalidate_live_intervals();
-   calculate_live_intervals();
+   calculate_live_intervals(extra);
 
    int num_instructions = 0;
    foreach_list(node, &this->instructions) {
@@ -2960,10 +3000,16 @@ fs_visitor::calculate_register_pressure()
 
    regs_live_at_ip = rzalloc_array(mem_ctx, int, num_instructions);
 
+   int pressure = 0;
+
    for (int reg = 0; reg < virtual_grf_count; reg++) {
-      for (int ip = virtual_grf_start[reg]; ip <= virtual_grf_end[reg]; ip++)
+      for (int ip = virtual_grf_start[reg]; ip <= virtual_grf_end[reg]; ip++) {
          regs_live_at_ip[ip] += virtual_grf_sizes[reg];
+         pressure = MAX2(pressure, regs_live_at_ip[ip]);
+      }
    }
+
+   return pressure;
 }
 
 /**
@@ -3089,18 +3135,39 @@ fs_visitor::run()
       assign_curb_setup();
       assign_urb_setup();
 
-      static enum instruction_scheduler_mode pre_modes[] = {
+      static const enum instruction_scheduler_mode pre_modes_classic[] = {
          SCHEDULE_PRE,
          SCHEDULE_PRE_NON_LIFO,
          SCHEDULE_PRE_LIFO,
       };
 
+      static const enum instruction_scheduler_mode pre_modes_glassy[] = {
+#ifdef USE_LUNARGLASS
+         SCHEDULE_PRE_IPS_BU_HI,
+         SCHEDULE_PRE_IPS_BU_MH,
+         SCHEDULE_PRE_IPS_BU_MD,
+         SCHEDULE_PRE_IPS_BU_ML,
+         SCHEDULE_PRE_IPS_BU_LO,
+#endif // USE_LUNARGLASS
+      };
+
+      unsigned pre_mode_count = 0;
+      const enum instruction_scheduler_mode* pre_modes = 0;
+      
+      if (_mesa_use_glass(ctx)) {
+         pre_modes = pre_modes_glassy;
+         pre_mode_count = ARRAY_SIZE(pre_modes_glassy);
+      } else {
+         pre_modes = pre_modes_classic;
+         pre_mode_count = ARRAY_SIZE(pre_modes_classic);
+      }
+
       /* Try each scheduling heuristic to see if it can successfully register
        * allocate without spilling.  They should be ordered by decreasing
        * performance but increasing likelihood of allocating.
        */
-      for (unsigned i = 0; i < ARRAY_SIZE(pre_modes); i++) {
-         schedule_instructions(pre_modes[i]);
+      for (unsigned i = 0; i < pre_mode_count; i++) {
+         estimated_clocks = schedule_instructions(pre_modes[i]);
 
          if (0) {
             assign_regs_trivial();
@@ -3207,7 +3274,10 @@ brw_wm_fs_emit(struct brw_context *brw, struct brw_wm_compile *c,
             perf_debug("SIMD16 shader failed to compile, falling back to "
                        "SIMD8 at a 10-20%% performance cost: %s", v2.fail_msg);
          } else {
-            simd16_instructions = &v2.instructions;
+            // Use simd16 unless it looks some ratio worse than simd8
+            if (!_mesa_use_glass(&brw->ctx) ||
+                ((v2.estimated_clocks * 7 / 8) < v.estimated_clocks))
+               simd16_instructions = &v2.instructions;
          }
       } else {
          perf_debug("SIMD16 shader unsupported, falling back to "

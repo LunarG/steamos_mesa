@@ -267,7 +267,7 @@ void brwInitFragProgFuncs( struct dd_function_table *functions )
 void
 brw_init_shader_time(struct brw_context *brw)
 {
-   const int max_entries = 4096;
+   const int max_entries = 8192;
    brw->shader_time.bo = drm_intel_bo_alloc(brw->bufmgr, "shader time",
                                             max_entries * SHADER_TIME_STRIDE,
                                             4096);

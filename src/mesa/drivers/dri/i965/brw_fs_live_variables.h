@@ -87,6 +87,7 @@ public:
    int num_vars;
    int num_vgrfs;
    int bitset_words;
+   int blocks;
 
    /** @{
     * Final computed live ranges for each var (each component of each virtual

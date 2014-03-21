@@ -64,6 +64,14 @@ public:
 };
 
 enum instruction_scheduler_mode {
+   SCHEDULE_PRE_IPS_TD_HI,
+   SCHEDULE_PRE_IPS_TD_LO,
+   SCHEDULE_PRE_IPS_BU_LIMIT,
+   SCHEDULE_PRE_IPS_BU_LO,
+   SCHEDULE_PRE_IPS_BU_ML,
+   SCHEDULE_PRE_IPS_BU_MD,
+   SCHEDULE_PRE_IPS_BU_MH,
+   SCHEDULE_PRE_IPS_BU_HI,
    SCHEDULE_PRE,
    SCHEDULE_PRE_NON_LIFO,
    SCHEDULE_PRE_LIFO,
@@ -98,11 +106,15 @@ public:
    exec_list instructions;
 
    virtual void dump_instruction(backend_instruction *inst) = 0;
+   virtual void dump_instruction(backend_instruction *inst, FILE *file) = 0;
+   virtual void dump_instruction(backend_instruction *inst, char* string) = 0;
    virtual void dump_instructions();
 
    void assign_common_binding_table_offsets(uint32_t next_binding_table_offset);
 
    virtual void invalidate_live_intervals() = 0;
+   virtual int live_in_count(int block_num) const = 0;
+   virtual int live_out_count(int block_num) const = 0;
 };
 
 uint32_t brw_texture_offset(struct gl_context *ctx, ir_constant *offset);

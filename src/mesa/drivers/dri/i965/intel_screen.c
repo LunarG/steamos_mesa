@@ -67,7 +67,20 @@ DRI_CONF_BEGIN
       DRI_CONF_OPT_BEGIN_B(disable_derivative_optimization, "false")
 	 DRI_CONF_DESC(en, "Derivatives with finer granularity by default")
       DRI_CONF_OPT_END
-   DRI_CONF_SECTION_END
+
+      DRI_CONF_OPT_BEGIN_V(glass_mode, enum, 0, "0:2")
+    DRI_CONF_DESC_BEGIN(en, "Glass Optimizer Mode")
+       DRI_CONF_ENUM(0, "Disable Glass Optimizer")
+       DRI_CONF_ENUM(1, "Use Driver Whitelist")
+       DRI_CONF_ENUM(2, "Enable Glass Optimizer")
+    DRI_CONF_DESC_END
+    DRI_CONF_OPT_END
+
+      DRI_CONF_OPT_BEGIN_B(glass_enable_reassociation, "true")
+         DRI_CONF_DESC(en, "Use reassociate optimization pass in LunarGLASS")
+      DRI_CONF_OPT_END
+
+    DRI_CONF_SECTION_END
 
    DRI_CONF_SECTION_QUALITY
       DRI_CONF_FORCE_S3TC_ENABLE("false")

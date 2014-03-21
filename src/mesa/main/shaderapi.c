@@ -94,6 +94,8 @@ _mesa_get_shader_flags(void)
          flags |= GLSL_USE_PROG;
       if (strstr(env, "errors"))
          flags |= GLSL_REPORT_ERRORS;
+      if (strstr(env, "glassy"))
+         flags |= GLSL_USE_GLASS;
    }
 
    return flags;

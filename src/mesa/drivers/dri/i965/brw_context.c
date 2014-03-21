@@ -506,6 +506,15 @@ brw_initialize_context_constants(struct brw_context *brw)
       ctx->Const.ViewportBounds.Min = -(float)ctx->Const.MaxViewportWidth;
       ctx->Const.ViewportBounds.Max = ctx->Const.MaxViewportWidth;
    }
+
+   if (unlikely(INTEL_DEBUG & DEBUG_DRI)) {
+      switch (ctx->Const.GlassMode) {
+      case DRI_CONF_GLASS_MODE_NEVER:     fprintf(stderr, "GlassMode = never\n");     break;
+      case DRI_CONF_GLASS_MODE_WHITELIST: fprintf(stderr, "GlassMode = whitelist\n"); break;
+      case DRI_CONF_GLASS_MODE_ALWAYS:    fprintf(stderr, "GlassMode = always\n");    break;
+      default:                            fprintf(stderr, "GlassMode = unknown\n");   break;
+      }
+   }
 }
 
 /**
@@ -565,6 +574,12 @@ brw_process_driconf_options(struct brw_context *brw)
 
    ctx->Const.DisableGLSLLineContinuations =
       driQueryOptionb(options, "disable_glsl_line_continuations");
+
+
+   ctx->Const.GlassMode = driQueryOptioni(&brw->optionCache, "glass_mode");
+   ctx->Const.GlassEnableReassociation =
+      driQueryOptionb(&brw->optionCache, "glass_enable_reassociation");
+
 
    const int multithread_glsl_compiler =
       driQueryOptioni(options, "multithread_glsl_compiler");

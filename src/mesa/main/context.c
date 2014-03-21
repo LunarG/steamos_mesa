@@ -415,6 +415,8 @@ one_time_init( struct gl_context *ctx )
 #ifdef DEBUG
       _mesa_test_formats();
 #endif
+
+      _mesa_create_shader_compiler();
    }
 
    /* per-API one-time init */
@@ -714,6 +716,8 @@ _mesa_init_constants(struct gl_context *ctx)
    /** GL_ARB_gpu_shader5 */
    ctx->Const.MinFragmentInterpolationOffset = MIN_FRAGMENT_INTERPOLATION_OFFSET;
    ctx->Const.MaxFragmentInterpolationOffset = MAX_FRAGMENT_INTERPOLATION_OFFSET;
+
+   ctx->Const.GlassMode = 0;
 }
 
 

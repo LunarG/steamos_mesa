@@ -62,6 +62,8 @@ namespace brw {
    class fs_live_variables;
 }
 
+class igraph_t;
+
 class fs_reg {
 public:
    DECLARE_RALLOC_CXX_OPERATORS(fs_reg)
@@ -347,13 +349,21 @@ public:
    void calculate_urb_setup();
    void assign_urb_setup();
    bool assign_regs(bool allow_spilling);
+   bool assign_regs_classic(bool allow_spilling);
+   bool assign_regs_glassy(bool allow_spilling);
    void assign_regs_trivial();
    void get_used_mrfs(bool *mrf_used);
-   void setup_payload_interference(struct ra_graph *g, int payload_reg_count,
+   void setup_payload_interference(struct ra_graph *g,
+                                   int* payload_last_use_ip,
+                                   int* mrf_first_use_ip,
+                                   int payload_reg_count,
+                                   int mrf_node_count,
                                    int first_payload_node);
    void setup_mrf_hack_interference(struct ra_graph *g,
                                     int first_mrf_hack_node);
+   void choose_spill_reg(float* spill_costs, bool* no_spill);
    int choose_spill_reg(struct ra_graph *g);
+   int choose_spill_reg(igraph_t& g);
    void spill_reg(int spill_reg);
    void split_virtual_grfs();
    void compact_virtual_grfs();
@@ -361,8 +371,8 @@ public:
    void assign_constant_locations();
    void demote_pull_constants();
    void invalidate_live_intervals();
-   void calculate_live_intervals();
-   void calculate_register_pressure();
+   void calculate_live_intervals(int extra = 0);
+   int calculate_register_pressure(int extra = 0);
    bool opt_algebraic();
    bool opt_cse();
    bool opt_cse_local(bblock_t *block, exec_list *aeb);
@@ -376,7 +386,9 @@ public:
    bool dead_code_eliminate();
    bool remove_duplicate_mrf_writes();
    bool virtual_grf_interferes(int a, int b);
-   void schedule_instructions(instruction_scheduler_mode mode);
+   int  live_in_count(int block_num) const;
+   int  live_out_count(int block_num) const;
+   int schedule_instructions(instruction_scheduler_mode mode);
    void insert_gen4_send_dependency_workarounds();
    void insert_gen4_pre_send_dependency_workarounds(fs_inst *inst);
    void insert_gen4_post_send_dependency_workarounds(fs_inst *inst);
@@ -489,6 +501,8 @@ public:
 
    virtual void dump_instructions();
    void dump_instruction(backend_instruction *inst);
+   void dump_instruction(backend_instruction *inst, FILE *file);
+   void dump_instruction(backend_instruction *inst, char* string);
 
    void visit_atomic_counter_intrinsic(ir_call *ir);
 
@@ -509,6 +523,8 @@ public:
 
    /** Number of uniform variable components visited. */
    unsigned uniforms;
+
+   int estimated_clocks;
 
    /**
     * Array mapping UNIFORM register numbers to the pull parameter index,

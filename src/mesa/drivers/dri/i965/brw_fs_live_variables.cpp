@@ -275,6 +275,7 @@ fs_live_variables::fs_live_variables(fs_visitor *v, cfg_t *cfg)
    }
 
    bd = rzalloc_array(mem_ctx, struct block_data, cfg->num_blocks);
+   blocks = cfg->num_blocks;
 
    bitset_words = BITSET_WORDS(num_vars);
    for (int i = 0; i < cfg->num_blocks; i++) {
@@ -308,12 +309,12 @@ fs_visitor::invalidate_live_intervals()
  * information about whole VGRFs.
  */
 void
-fs_visitor::calculate_live_intervals()
+fs_visitor::calculate_live_intervals(int payload)
 {
    if (this->live_intervals)
       return;
 
-   int num_vgrfs = this->virtual_grf_count;
+   int num_vgrfs = this->virtual_grf_count + payload;
    ralloc_free(this->virtual_grf_start);
    ralloc_free(this->virtual_grf_end);
    virtual_grf_start = ralloc_array(mem_ctx, int, num_vgrfs);
@@ -349,4 +350,50 @@ fs_visitor::virtual_grf_interferes(int a, int b)
 {
    return !(virtual_grf_end[a] <= virtual_grf_start[b] ||
             virtual_grf_end[b] <= virtual_grf_start[a]);
+}
+
+int
+fs_visitor::live_in_count(int block_num) const
+{
+   int count = 0;
+
+   assert(this->live_intervals);
+   assert(this->live_intervals->bd);
+   assert(block_num < this->live_intervals->blocks);
+
+   /* Count number of live ins for each block */
+   for (int i=0; i<this->live_intervals->bitset_words; ++i)
+      count += _mesa_bitcount(this->live_intervals->bd[block_num].livein[i]);
+
+   return count;
+}
+
+int
+fs_visitor::live_out_count(int block_num) const
+{
+   int count = 0;
+
+   assert(this->live_intervals);
+   assert(this->live_intervals->bd);
+   assert(block_num < this->live_intervals->blocks);
+
+   /* Count number of live ins for each block */
+   for (int i=0; i<this->live_intervals->bitset_words; ++i)
+      count += _mesa_bitcount(this->live_intervals->bd[block_num].liveout[i]);
+
+   static const bool debug = false;
+
+   if (debug) {
+      int count = 0;
+      fprintf(stderr, "Block %d out: ", block_num);
+      for (int var=0; var<this->live_intervals->num_vars; ++var)
+         if (BITSET_TEST(this->live_intervals->bd[block_num].liveout, var)) {
+            ++count;
+            fprintf(stderr, "var%d=vgrf%d ", var, this->live_intervals->vgrf_from_var[var]);
+         }
+         
+      fprintf(stderr, " (total=%d)\n", count);
+   }
+
+   return count;
 }

@@ -67,6 +67,7 @@ public:
 
    int num_vars;
    int bitset_words;
+   int blocks;
 
    /** Per-basic-block information on live variables */
    struct block_data *bd;

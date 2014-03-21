@@ -296,6 +296,18 @@ compile_shader(struct gl_context *ctx, struct gl_shader *shader)
    struct _mesa_glsl_parse_state *state =
       new(shader) _mesa_glsl_parse_state(ctx, shader->Stage, shader);
 
+   // There's no _Shader set up in the context pipeline state for the standalone
+   // compiler, so we fake it.
+   GLbitfield flags = 0x0;
+   const char *env = _mesa_getenv("MESA_GLSL");
+   if (env) {
+      if (strstr(env, "glassy"))
+         flags |= GLSL_USE_GLASS;
+   }
+
+   if (flags & GLSL_USE_GLASS)
+      ctx->Const.GlassMode = 2;
+
    _mesa_glsl_compile_shader(ctx, shader, dump_ast, dump_hir);
 
    /* Print out the resulting IR */
@@ -344,6 +356,7 @@ main(int argc, char **argv)
       }
    }
 
+   _mesa_create_shader_compiler();
 
    if (argc <= optind)
       usage_fail(argv[0]);

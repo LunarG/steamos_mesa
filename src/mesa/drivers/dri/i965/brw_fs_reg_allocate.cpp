@@ -28,12 +28,220 @@
 #include "brw_fs.h"
 #include "glsl/glsl_types.h"
 #include "glsl/ir_optimization.h"
+#include "glsl/glsl_parser_extras.h"
+
+static const bool debug = false;
+
+#ifdef USE_LUNARGLASS
+#include <vector>
+#include <algorithm>
+#include <bitset>
+
+class igraph_node_t {
+public:
+   igraph_node_t(int node_count) : color(-1), size(1), spillCost(-1.0f)
+   {
+      edges.reserve(16);
+   }
+
+   void addEdge(int i) { edges.push_back(i); }
+   int  getEdge(int p) const { return edges[p]; }
+   int  getColor() const { return color; }
+   void setColor(int c) { color = c; }
+   int  getEdgeCount() const { return edges.size(); }
+   void setSize(int s) { size = s; }
+   int  getSize() const { return size; }
+   void setSpillCost(float c) { spillCost = c; }
+   float getSpillCost() const { return spillCost; }
+
+   bool interferesWith(int n) const { return std::find(edges.begin(), edges.end(), n) != edges.end(); }
+
+   void dumpEdges() const {
+      for (int e=0; e<int(edges.size()); ++e)
+         fprintf(stderr, " %d", edges[e]);
+   }
+
+private:
+   std::vector<int> edges;
+   int   color;
+   int   edgeCount;
+   int   size;
+   float spillCost;
+};
+
+class igraph_t {
+public:
+   static const int max_reg_count = 128; // max registers we can ever allocate
+
+   igraph_t(int node_count, int phys_count,
+            int virtual_grf_count, int* virtual_grf_sizes) :
+      toColor(node_count),
+      nodes(node_count, igraph_node_t(node_count)),
+      phys_count(phys_count),
+      virtual_grf_count(virtual_grf_count),
+      fail_node(-1)
+   {
+      assert(phys_count <= max_reg_count);
+
+      for (int n=0; n<virtual_grf_count; ++n)
+         nodes[n].setSize(virtual_grf_sizes[n]);
+   }
+
+   void dumpGraph() const {
+      fprintf(stderr, "RA: igraph:\n");
+      for (int n=0; n<int(nodes.size()); ++n) {
+         fprintf(stderr, "RA: Node %3d ->%3d:", n, nodes[n].getColor());
+         nodes[n].dumpEdges();
+         fprintf(stderr, "\n");
+      }
+   }
+
+   void addInterference(int i, int j) {
+      assert(i != j);
+      nodes[i].addEdge(j);
+      nodes[j].addEdge(i);
+   }
+
+   int  getColor(int i) const { return nodes[i].getColor(); }
+   void setColor(int i, int color) { nodes[i].setColor(color); }
+
+   void setSpillCost(int i, float c) { nodes[i].setSpillCost(c); }
+
+   int getBestSpillNode() const;
+
+   struct sorter {
+      sorter(const igraph_t& g) : g(g) { }
+
+      bool operator()(int i, int j) const {
+         return
+            g.nodes[i].getSize() != g.nodes[j].getSize() ?
+                  g.nodes[i].getSize() > g.nodes[j].getSize() :
+            g.nodes[i].getEdgeCount() != g.nodes[j].getEdgeCount() ?
+                  g.nodes[i].getEdgeCount() > g.nodes[j].getEdgeCount() :
+            i < j;
+      }
+
+      const igraph_t& g;
+   };
+
+   bool colorNode(int n, std::bitset<max_reg_count>& used) {
+      // Trivial return if already colored
+      if (nodes[n].getColor() >= 0)
+         return true;
+
+      used.reset();
+
+      // Place interfering nodes
+      for (int e=0; e<nodes[n].getEdgeCount(); ++e) {
+         const int n2    = nodes[n].getEdge(e);
+         const int color = nodes[n2].getColor();
+         if (color >= 0)
+            for (int s=0; s<nodes[n2].getSize(); ++s)
+               used.set(color+s);
+      }
+
+      // Find color for this node
+      int c;
+      int avail=0;
+      for (c=0; c<phys_count; ++c) {
+         if (used.test(c))
+            avail=0;
+         else
+            if (++avail >= nodes[n].getSize())
+               break;
+      }
+
+      if (avail < nodes[n].getSize())
+         return false;
+
+      nodes[n].setColor(c + 1 - nodes[n].getSize());
+      return true;
+   }
+
+   bool colorGraph() {
+      for (int n=0; n<int(nodes.size()); ++n)
+         toColor[n] = n;
+
+      std::sort(toColor.begin(), toColor.end(), sorter(*this));
+
+      std::bitset<max_reg_count> used;
+
+      for (int n=0; n<int(toColor.size()); ++n) {
+         if (!colorNode(toColor[n], used)) {
+            fail_node = toColor[n];
+
+            if (debug) {
+               fprintf(stderr, "RA: fail: node=%d, size=%d\n",
+                       toColor[n],
+                       nodes[toColor[n]].getSize());
+               fprintf(stderr, "RA: Map: ");
+               for (int x=0; x<int(used.size()); ++x)
+                  fprintf(stderr, "%s", used[x] ? "X" : ".");
+               fprintf(stderr, "\n");
+            }
+            
+            return false;
+         }
+      }
+
+      return true;
+   }
+
+private:
+   float getSpillBenefit(int n) const;
+
+   std::vector<int> toColor;
+   std::vector<igraph_node_t> nodes;
+   int phys_count;
+   int virtual_grf_count;
+   int fail_node;
+};
+
+float igraph_t::getSpillBenefit(int n) const
+{
+   float benefit = 0;
+
+   for (int e = 0; e < nodes[n].getEdgeCount(); e++) {
+      int n2 = nodes[n].getEdge(e);
+
+      if (n != n2)
+         benefit += nodes[n2].getSize();
+   }
+
+   return benefit;
+}
+
+int igraph_t::getBestSpillNode() const
+{
+   unsigned int best_node = -1;
+   float best_benefit = 0.0;
+
+   for (int n = 0; n < virtual_grf_count; n++) {
+      const float cost = nodes[n].getSpillCost();
+
+      if (cost <= 0.0)
+         continue;
+
+      const float benefit = getSpillBenefit(n);
+
+      if (benefit / cost > best_benefit) {
+         best_benefit = benefit / cost;
+         best_node = n;
+      }
+   }
+
+   return best_node;
+}
+
+#endif // USE_LUNARGLASS
 
 static void
 assign_reg(int *reg_hw_locations, fs_reg *reg, int reg_width)
 {
    if (reg->file == GRF) {
       assert(reg->reg_offset >= 0);
+      assert(reg_hw_locations[reg->reg] >= 0);
+
       reg->reg = reg_hw_locations[reg->reg] + reg->reg_offset * reg_width;
       reg->reg_offset = 0;
    }
@@ -231,15 +439,24 @@ count_to_loop_end(fs_inst *do_inst)
  */
 void
 fs_visitor::setup_payload_interference(struct ra_graph *g,
+                                       int* payload_last_use_ip,
+                                       int* mrf_first_use_ip,
                                        int payload_node_count,
+                                       int mrf_node_count,
                                        int first_payload_node)
 {
    int reg_width = dispatch_width / 8;
    int loop_depth = 0;
    int loop_end_ip = 0;
+   int loop_start_ip = 0;
 
-   int payload_last_use_ip[payload_node_count];
-   memset(payload_last_use_ip, 0, sizeof(payload_last_use_ip));
+   memset(payload_last_use_ip, 0, payload_node_count * sizeof(int));
+
+   if (mrf_first_use_ip) {
+      for (int i=0; i<mrf_node_count; ++i)
+         mrf_first_use_ip[i] = -1;
+   }
+
    int ip = 0;
    foreach_list(node, &this->instructions) {
       fs_inst *inst = (fs_inst *)node;
@@ -253,8 +470,10 @@ fs_visitor::setup_payload_interference(struct ra_graph *g,
           * interval extends to the end of the outermost loop.  Find the ip of
           * the end now.
           */
-         if (loop_depth == 1)
+         if (loop_depth == 1) {
+            loop_start_ip = ip;
             loop_end_ip = ip + count_to_loop_end(inst);
+         }
          break;
       case BRW_OPCODE_WHILE:
          loop_depth--;
@@ -264,10 +483,14 @@ fs_visitor::setup_payload_interference(struct ra_graph *g,
       }
 
       int use_ip;
-      if (loop_depth > 0)
+      int mrf_ip;
+      if (loop_depth > 0) {
          use_ip = loop_end_ip;
-      else
+         mrf_ip = loop_start_ip;
+      } else {
          use_ip = ip;
+         mrf_ip = ip;
+      }
 
       /* Note that UNIFORM args have been turned into FIXED_HW_REG by
        * assign_curbe_setup(), and interpolation uses fixed hardware regs from
@@ -281,6 +504,26 @@ fs_visitor::setup_payload_interference(struct ra_graph *g,
                continue;
 
             payload_last_use_ip[node_nr] = use_ip;
+         }
+      }
+
+      if (mrf_first_use_ip) {
+         if (inst->dst.file == MRF) {
+            const int reg = inst->dst.reg & ~BRW_MRF_COMPR4;
+            mrf_first_use_ip[reg] = mrf_ip;
+            if (reg_width == 2) {
+               if (inst->dst.reg & BRW_MRF_COMPR4) {
+                  mrf_first_use_ip[reg + 4] = mrf_ip;
+               } else {
+                  mrf_first_use_ip[reg + 1] = mrf_ip;
+               }
+            }
+         }
+
+         if (inst->mlen > 0) {
+            for (int i = 0; i < implied_mrf_writes(inst); i++) {
+               mrf_first_use_ip[inst->base_mrf + i] = mrf_ip;
+            }
          }
       }
 
@@ -322,29 +565,31 @@ fs_visitor::setup_payload_interference(struct ra_graph *g,
       ip++;
    }
 
-   for (int i = 0; i < payload_node_count; i++) {
-      /* Mark the payload node as interfering with any virtual grf that is
-       * live between the start of the program and our last use of the payload
-       * node.
-       */
-      for (int j = 0; j < this->virtual_grf_count; j++) {
-         /* Note that we use a <= comparison, unlike virtual_grf_interferes(),
-          * in order to not have to worry about the uniform issue described in
-          * calculate_live_intervals().
+   if (g) {
+      for (int i = 0; i < payload_node_count; i++) {
+         /* Mark the payload node as interfering with any virtual grf that is
+          * live between the start of the program and our last use of the payload
+          * node.
           */
-         if (this->virtual_grf_start[j] <= payload_last_use_ip[i]) {
-            ra_add_node_interference(g, first_payload_node + i, j);
+         for (int j = 0; j < this->virtual_grf_count; j++) {
+            /* Note that we use a <= comparison, unlike virtual_grf_interferes(),
+             * in order to not have to worry about the uniform issue described in
+             * calculate_live_intervals().
+             */
+            if (this->virtual_grf_start[j] <= payload_last_use_ip[i]) {
+               ra_add_node_interference(g, first_payload_node + i, j);
+            }
          }
       }
-   }
 
-   for (int i = 0; i < payload_node_count; i++) {
-      /* Mark each payload node as being allocated to its physical register.
-       *
-       * The alternative would be to have per-physical-register classes, which
-       * would just be silly.
-       */
-      ra_set_node_reg(g, first_payload_node + i, i);
+      for (int i = 0; i < payload_node_count; i++) {
+         /* Mark each payload node as being allocated to its physical register.
+          *
+          * The alternative would be to have per-physical-register classes, which
+          * would just be silly.
+          */
+         ra_set_node_reg(g, first_payload_node + i, i);
+      }
    }
 }
 
@@ -418,8 +663,139 @@ fs_visitor::setup_mrf_hack_interference(struct ra_graph *g, int first_mrf_node)
    }
 }
 
+#ifdef USE_LUNARGLASS
+
 bool
-fs_visitor::assign_regs(bool allow_spilling)
+fs_visitor::assign_regs_glassy(bool allow_spilling)
+{
+   /* Most of this allocation was written for a reg_width of 1
+    * (dispatch_width == 8).  In extending to SIMD16, the code was
+    * left in place and it was converted to have the hardware
+    * registers it's allocating be contiguous physical pairs of regs
+    * for reg_width == 2.
+    */
+   int reg_width = dispatch_width / 8;
+   int payload_node_count = (ALIGN(this->first_non_payload_grf, reg_width) /
+                            reg_width);
+
+   int node_count = this->virtual_grf_count;
+   int first_payload_node = node_count;
+   node_count += payload_node_count;
+   int first_mrf_hack_node = node_count;
+   int mrf_hack_node_count = 0;
+   if (brw->gen >= 7) {
+      mrf_hack_node_count = BRW_MAX_GRF - GEN7_MRF_HACK_START;
+      node_count += mrf_hack_node_count;
+   }
+
+   int hw_reg_mapping[node_count];
+   int mrf_first_use_ip[mrf_hack_node_count];
+   int payload_last_use_ip[payload_node_count];
+   int extra_regs = node_count - virtual_grf_count;
+
+   invalidate_live_intervals();
+   calculate_live_intervals(extra_regs);
+
+   const int incoming_pressure = debug ? calculate_register_pressure(extra_regs) : 0;
+
+   setup_payload_interference(0, payload_last_use_ip, mrf_first_use_ip,
+                              payload_node_count, mrf_hack_node_count, first_payload_node);
+
+   igraph_t igraph(node_count, BRW_MAX_GRF / reg_width, virtual_grf_count, virtual_grf_sizes);
+
+   if (debug) {
+      fprintf(stderr, "RA: width=%d, incoming pressure=%d\n", reg_width, incoming_pressure);
+   }
+
+   // Set payload interferences
+   for (int i = 0; i < payload_node_count; i++) {
+      for (int j = 0; j < this->virtual_grf_count; j++)
+         if (this->virtual_grf_start[j] <= payload_last_use_ip[i])
+            igraph.addInterference(first_payload_node + i, j);
+
+      igraph.setColor(first_payload_node + i, i);
+   }
+
+   // Set node interferences
+   for (int i = 0; i < node_count; i++)
+      for (int j = 0; j < i; j++)
+         if (virtual_grf_interferes(i, j) ||
+             (virtual_grf_end[i] == virtual_grf_start[i] ||
+              virtual_grf_end[j] == virtual_grf_start[j]))
+            igraph.addInterference(i, j);
+
+   // Set MRF interferences
+   if (brw->gen >= 7) {
+      for (int i = 0; i < mrf_hack_node_count; i++) {
+         if (mrf_first_use_ip[i] >= 0) {
+            for (int j = 0; j < this->virtual_grf_count; j++)
+               if (this->virtual_grf_end[j] >= mrf_first_use_ip[i])
+                  igraph.addInterference(first_mrf_hack_node + i, j);
+
+            igraph.setColor(first_mrf_hack_node + i, (GEN7_MRF_HACK_START + i) / reg_width);
+         }
+      }
+   }
+
+   if (!igraph.colorGraph()) {
+      /* Failed to allocate registers.  Spill a reg, and the caller will
+       * loop back into here to try again. */
+
+      if (allow_spilling) {
+         const int reg = choose_spill_reg(igraph);
+
+         if (debug) {
+            fprintf(stderr, "RA: spill: reg=%d, size=%d\n", reg, virtual_grf_sizes[reg]);
+            // fprintf(stderr, "RA: pre-spill\n");
+            // dump_instructions();
+            // fprintf(stderr, "RA: post-spill\n");
+            // dump_instructions();
+         }
+
+         if (reg == -1) {
+            fail("no register to spill:\n");
+            dump_instructions();
+         } else {
+            spill_reg(reg);
+         }
+      }
+
+      return false;
+   }
+
+   /* Get the chosen virtual registers for each node, and map virtual
+    * regs in the register classes back down to real hardware reg
+    * numbers.
+    */
+   this->grf_used = payload_node_count * reg_width;
+   for (int i = 0; i < this->virtual_grf_count; i++) {
+      hw_reg_mapping[i] = igraph.getColor(i) * reg_width;
+
+      // fprintf(stderr, "RA: vgrf%d -> %d\n", i, hw_reg_mapping[i]);
+      
+      this->grf_used = MAX2(this->grf_used,
+        		    hw_reg_mapping[i] + this->virtual_grf_sizes[i] * reg_width);
+   }
+
+   foreach_list(node, &this->instructions) {
+      fs_inst *inst = (fs_inst *)node;
+
+      assign_reg(hw_reg_mapping, &inst->dst,    reg_width);
+      assign_reg(hw_reg_mapping, &inst->src[0], reg_width);
+      assign_reg(hw_reg_mapping, &inst->src[1], reg_width);
+      assign_reg(hw_reg_mapping, &inst->src[2], reg_width);
+   }
+
+   if (debug || unlikely(INTEL_DEBUG & DEBUG_WM)) {
+      fprintf(stderr, "RA: success\n");
+   }
+
+   return true;
+}
+#endif // USE_LUNARGLASS
+
+bool
+fs_visitor::assign_regs_classic(bool allow_spilling)
 {
    struct intel_screen *screen = brw->intelScreen;
    /* Most of this allocation was written for a reg_width of 1
@@ -441,6 +817,9 @@ fs_visitor::assign_regs(bool allow_spilling)
    int first_mrf_hack_node = node_count;
    if (brw->gen >= 7)
       node_count += BRW_MAX_GRF - GEN7_MRF_HACK_START;
+
+   int payload_last_use_ip[payload_node_count];
+
    struct ra_graph *g = ra_alloc_interference_graph(screen->wm_reg_sets[rsi].regs,
                                                     node_count);
 
@@ -475,7 +854,7 @@ fs_visitor::assign_regs(bool allow_spilling)
       }
    }
 
-   setup_payload_interference(g, payload_node_count, first_payload_node);
+   setup_payload_interference(g, payload_last_use_ip, 0, payload_node_count, 0, first_payload_node);
    if (brw->gen >= 7)
       setup_mrf_hack_interference(g, first_mrf_hack_node);
 
@@ -536,6 +915,17 @@ fs_visitor::assign_regs(bool allow_spilling)
    return true;
 }
 
+bool
+fs_visitor::assign_regs(bool allow_spilling)
+{
+#ifdef USE_LUNARGLASS
+   if (_mesa_use_glass(ctx))
+      return assign_regs_glassy(allow_spilling);
+#endif // USE_LUNARGLASS
+
+   return assign_regs_classic(allow_spilling);
+}
+
 void
 fs_visitor::emit_unspill(fs_inst *inst, fs_reg dst, uint32_t spill_offset,
                          int count)
@@ -564,12 +954,10 @@ fs_visitor::emit_unspill(fs_inst *inst, fs_reg dst, uint32_t spill_offset,
    }
 }
 
-int
-fs_visitor::choose_spill_reg(struct ra_graph *g)
+void
+fs_visitor::choose_spill_reg(float* spill_costs, bool* no_spill)
 {
    float loop_scale = 1.0;
-   float spill_costs[this->virtual_grf_count];
-   bool no_spill[this->virtual_grf_count];
 
    for (int i = 0; i < this->virtual_grf_count; i++) {
       spill_costs[i] = 0.0;
@@ -633,6 +1021,15 @@ fs_visitor::choose_spill_reg(struct ra_graph *g)
 	 break;
       }
    }
+}
+
+int
+fs_visitor::choose_spill_reg(struct ra_graph *g)
+{
+   float spill_costs[this->virtual_grf_count];
+   bool no_spill[this->virtual_grf_count];
+
+   choose_spill_reg(spill_costs, no_spill);
 
    for (int i = 0; i < this->virtual_grf_count; i++) {
       if (!no_spill[i])
@@ -641,6 +1038,24 @@ fs_visitor::choose_spill_reg(struct ra_graph *g)
 
    return ra_get_best_spill_node(g);
 }
+
+#ifdef USE_LUNARGLASS
+int
+fs_visitor::choose_spill_reg(igraph_t& g)
+{
+   float spill_costs[this->virtual_grf_count];
+   bool no_spill[this->virtual_grf_count];
+
+   choose_spill_reg(spill_costs, no_spill);
+
+   for (int i = 0; i < this->virtual_grf_count; i++) {
+      if (!no_spill[i])
+         g.setSpillCost(i, spill_costs[i]);
+   }
+
+   return g.getBestSpillNode();
+}
+#endif // USE_LUNARGLASS
 
 void
 fs_visitor::spill_reg(int spill_reg)

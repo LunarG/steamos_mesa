@@ -93,6 +93,8 @@ namespace brw {
 
 class dst_reg;
 
+class vec4_live_variables;
+
 unsigned
 swizzle_for_size(int size);
 
@@ -349,6 +351,7 @@ public:
    unsigned int max_grf;
    int *virtual_grf_start;
    int *virtual_grf_end;
+   brw::vec4_live_variables *live_intervals;
    dst_reg userplane[MAX_CLIP_PLANES];
 
    /**
@@ -358,8 +361,6 @@ public:
    int virtual_grf_reg_count;
    /** Per-virtual-grf indices into an array of size virtual_grf_reg_count */
    int *virtual_grf_reg_map;
-
-   bool live_intervals_valid;
 
    dst_reg *variable_storage(ir_variable *var);
 
@@ -435,11 +436,13 @@ public:
    void split_virtual_grfs();
    bool dead_code_eliminate();
    bool virtual_grf_interferes(int a, int b);
+   int  live_in_count(int block_num) const;
+   int  live_out_count(int block_num) const;
    bool opt_copy_propagation();
    bool opt_algebraic();
    bool opt_register_coalesce();
    void opt_set_dependency_control();
-   void opt_schedule_instructions();
+   int opt_schedule_instructions(instruction_scheduler_mode mode);
 
    bool can_do_source_mods(vec4_instruction *inst);
 
@@ -605,6 +608,8 @@ public:
    bool process_move_condition(ir_rvalue *ir);
 
    void dump_instruction(backend_instruction *inst);
+   void dump_instruction(backend_instruction *inst, FILE *file);
+   void dump_instruction(backend_instruction *inst, char* string);
 
    void visit_atomic_counter_intrinsic(ir_call *ir);
 

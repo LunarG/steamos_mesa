@@ -1986,7 +1986,8 @@ fs_visitor::emit_bool_to_cond_code(ir_rvalue *ir)
    if (expr &&
        expr->operation != ir_binop_logic_and &&
        expr->operation != ir_binop_logic_or &&
-       expr->operation != ir_binop_logic_xor) {
+       expr->operation != ir_binop_logic_xor &&
+       expr->operation != ir_triop_csel) {
       fs_reg op[2];
       fs_inst *inst;
 

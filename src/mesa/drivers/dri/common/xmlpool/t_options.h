@@ -250,6 +250,23 @@ DRI_CONF_OPT_BEGIN_V(fthrottle_mode,enum,def,"0:2") \
         DRI_CONF_DESC_END \
 DRI_CONF_OPT_END
 
+#define DRI_CONF_GLASS_MODE_NEVER 0
+#define DRI_CONF_GLASS_MODE_WHITELIST 1
+#define DRI_CONF_GLASS_MODE_ALWAYS 2
+#define DRI_CONF_GLASS_MODE(def) \
+DRI_CONF_OPT_BEGIN_V(glass_mode,enum,def,"0:2") \
+        DRI_CONF_DESC_BEGIN(en,gettext("LunarGlass Optimizer Mode")) \
+                DRI_CONF_ENUM(0,gettext("Never use LunarGlass optimizer")) \
+                DRI_CONF_ENUM(1,gettext("Use LunarGlass optimizer for whitelisted applications")) \
+                DRI_CONF_ENUM(2,gettext("Always use LunarGlass optimizer")) \
+        DRI_CONF_DESC_END \
+DRI_CONF_OPT_END
+
+#define DRI_CONF_GLASS_ENABLE_REASSOCIATION(def) \
+DRI_CONF_OPT_BEGIN_B(glass_enable_reassociation, def) \
+        DRI_CONF_DESC(en,gettext("Use reassociate optimization pass in LunarGLASS")) \
+DRI_CONF_OPT_END
+
 #define DRI_CONF_VBLANK_NEVER 0
 #define DRI_CONF_VBLANK_DEF_INTERVAL_0 1
 #define DRI_CONF_VBLANK_DEF_INTERVAL_1 2

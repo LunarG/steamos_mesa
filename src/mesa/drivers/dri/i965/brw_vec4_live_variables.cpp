@@ -158,8 +158,11 @@ vec4_live_variables::vec4_live_variables(vec4_visitor *v, cfg_t *cfg)
 {
    mem_ctx = ralloc_context(NULL);
 
+   // This is an emergency hack to work around a defect I don't have time to
+   // figure out the cause of.
    num_vars = v->virtual_grf_count * 4;
    bd = rzalloc_array(mem_ctx, struct block_data, cfg->num_blocks);
+   blocks = cfg->num_blocks;
 
    bitset_words = BITSET_WORDS(num_vars);
    for (int i = 0; i < cfg->num_blocks; i++) {
@@ -200,7 +203,7 @@ vec4_live_variables::~vec4_live_variables()
 void
 vec4_visitor::calculate_live_intervals()
 {
-   if (this->live_intervals_valid)
+   if (this->live_intervals)
       return;
 
    int *start = ralloc_array(mem_ctx, int, this->virtual_grf_count * 4);
@@ -255,29 +258,29 @@ vec4_visitor::calculate_live_intervals()
     * this point we're distilling it down to vgrfs.
     */
    cfg_t cfg(&instructions);
-   vec4_live_variables livevars(this, &cfg);
+   this->live_intervals = new(mem_ctx) vec4_live_variables(this, &cfg);
+
 
    for (int b = 0; b < cfg.num_blocks; b++) {
-      for (int i = 0; i < livevars.num_vars; i++) {
-	 if (BITSET_TEST(livevars.bd[b].livein, i)) {
+      for (int i = 0; i < live_intervals->num_vars; i++) {
+	 if (BITSET_TEST(live_intervals->bd[b].livein, i)) {
 	    start[i] = MIN2(start[i], cfg.blocks[b]->start_ip);
 	    end[i] = MAX2(end[i], cfg.blocks[b]->start_ip);
 	 }
 
-	 if (BITSET_TEST(livevars.bd[b].liveout, i)) {
+	 if (BITSET_TEST(live_intervals->bd[b].liveout, i)) {
 	    start[i] = MIN2(start[i], cfg.blocks[b]->end_ip);
 	    end[i] = MAX2(end[i], cfg.blocks[b]->end_ip);
 	 }
       }
    }
-
-   this->live_intervals_valid = true;
 }
 
 void
 vec4_visitor::invalidate_live_intervals()
 {
-   live_intervals_valid = false;
+   ralloc_free(live_intervals);
+   live_intervals = NULL;
 }
 
 bool
@@ -302,3 +305,36 @@ vec4_visitor::virtual_grf_interferes(int a, int b)
    return !(end_a <= start_b ||
             end_b <= start_a);
 }
+
+int
+vec4_visitor::live_out_count(int block_num) const
+{
+   int count = 0;
+
+   assert(this->live_intervals);
+   assert(this->live_intervals->bd);
+   assert(block_num < this->live_intervals->blocks);
+
+   /* Count number of live outs for each block */
+   for (int i=0; i<this->live_intervals->bitset_words; ++i)
+      count += _mesa_bitcount(this->live_intervals->bd[block_num].liveout[i]);
+
+   return count;
+}
+
+int
+vec4_visitor::live_in_count(int block_num) const
+{
+   int count = 0;
+
+   assert(this->live_intervals);
+   assert(this->live_intervals->bd);
+   assert(block_num < this->live_intervals->blocks);
+
+   /* Count number of live ins for each block */
+   for (int i=0; i<this->live_intervals->bitset_words; ++i)
+      count += _mesa_bitcount(this->live_intervals->bd[block_num].livein[i]);
+
+   return count;
+}
+

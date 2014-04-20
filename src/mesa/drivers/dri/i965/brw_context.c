@@ -565,6 +565,17 @@ brw_process_driconf_options(struct brw_context *brw)
 
    ctx->Const.DisableGLSLLineContinuations =
       driQueryOptionb(options, "disable_glsl_line_continuations");
+
+   const int multithread_glsl_compiler =
+      driQueryOptioni(options, "multithread_glsl_compiler");
+   if (multithread_glsl_compiler > 0) {
+      const int max_threads = (multithread_glsl_compiler > 1) ?
+         multithread_glsl_compiler : 2;
+
+      _mesa_enable_glsl_threadpool(ctx, max_threads);
+      ctx->Const.DeferCompileShader = GL_TRUE;
+      ctx->Const.DeferLinkProgram = GL_TRUE;
+   }
 }
 
 GLboolean
@@ -771,6 +782,10 @@ brwCreateContext(gl_api api,
 
    if (INTEL_DEBUG & DEBUG_SHADER_TIME)
       brw_init_shader_time(brw);
+
+   /* brw_shader_precompile is not thread-safe */
+   if (brw->precompile)
+      ctx->Const.DeferLinkProgram = GL_FALSE;
 
    _mesa_compute_version(ctx);
 

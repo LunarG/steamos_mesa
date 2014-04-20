@@ -102,7 +102,8 @@ LIBGLSL_FILES = \
 	$(GLSL_SRCDIR)/opt_tree_grafting.cpp \
 	$(GLSL_SRCDIR)/opt_vectorize.cpp \
 	$(GLSL_SRCDIR)/s_expression.cpp \
-	$(GLSL_SRCDIR)/strtod.cpp
+	$(GLSL_SRCDIR)/strtod.cpp \
+	$(GLSL_SRCDIR)/threadpool.c
 
 # glsl_compiler
 

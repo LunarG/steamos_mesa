@@ -496,6 +496,9 @@ builtin_variable_generator::add_uniform(const glsl_type *type,
 
    uni->state_slots = slots;
 
+   /* see main/config.h */
+   assert(uni->num_state_slots <= MAX_NUM_STATE_SLOTS);
+
    for (unsigned a = 0; a < array_count; a++) {
       for (unsigned j = 0; j < statevar->num_elements; j++) {
 	 const struct gl_builtin_uniform_element *element =

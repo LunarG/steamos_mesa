@@ -307,5 +307,9 @@
  */
 #define MAX_CLIPPED_VERTICES ((2 * (6 + MAX_CLIP_PLANES))+1)
 
+/**
+ * Maximum number of builtin state backing up a uniform variable.
+ */
+#define MAX_NUM_STATE_SLOTS 96
 
 #endif /* MESA_CONFIG_H_INCLUDED */

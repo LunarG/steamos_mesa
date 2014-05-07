@@ -221,6 +221,108 @@ serialization_epilogue:
 }
 
 
+const glsl_type *
+deserialize_glsl_type(memory_map *map, struct _mesa_glsl_parse_state *state,
+                      struct hash_table *type_hash)
+{
+   char *name = map->read_string();
+   uint32_t type_size = map->read_uint32_t();
+   const glsl_type *ret_type = glsl_type::error_type;
+
+   const glsl_type *existing_type =
+      state->symbols->get_type(name);
+
+   /* If type exists, move read pointer forward and return type. */
+   if (existing_type) {
+      map->ffwd(type_size);
+      return existing_type;
+   }
+
+   /* Has this user type been read and stored to hash already? */
+   uint8_t user_type_exists = map->read_uint8_t();
+   uint32_t type_id = map->read_uint32_t();
+
+   uint32_t length;
+   uint8_t base_type, interface_packing;
+
+   if (user_type_exists) {
+      hash_entry *entry =
+         _mesa_hash_table_search(type_hash, _mesa_hash_string(name),
+                                 (void*) (uintptr_t) type_id);
+
+      /* Return already read type from the hash. */
+      if (entry && entry->data)
+         return (const glsl_type *) entry->data;
+      else
+         goto type_serialization_error;
+   }
+
+   length = map->read_uint32_t();
+   base_type = map->read_uint8_t();
+   interface_packing = map->read_uint8_t();
+
+   if (base_type >= GLSL_TYPE_ERROR)
+      goto type_serialization_error;
+
+   /* Array type has additional element_type information. */
+   if (base_type == GLSL_TYPE_ARRAY) {
+      const glsl_type *element_type =
+         deserialize_glsl_type(map, state, type_hash);
+      if (!element_type)
+         goto type_serialization_error;
+
+      ret_type = glsl_type::get_array_instance(element_type, length);
+      goto return_type;
+   }
+
+   /* Structures have fields containing of names and types. */
+   else if (base_type == GLSL_TYPE_STRUCT ||
+      base_type == GLSL_TYPE_INTERFACE) {
+      glsl_struct_field *fields = ralloc_array(NULL, glsl_struct_field, length);
+      if (!fields)
+         goto type_serialization_error;
+
+      for (unsigned k = 0; k < length; k++) {
+         map->read(&fields[k], sizeof(glsl_struct_field));
+         char *field_name = map->read_string();
+         fields[k].name = _mesa_strdup(field_name);
+         fields[k].type = deserialize_glsl_type(map, state, type_hash);
+         /* Break out of the loop if read errors occured. */
+         if (map->errors())
+            goto type_serialization_error;
+      }
+
+      if (base_type == GLSL_TYPE_STRUCT)
+         ret_type = glsl_type::get_record_instance(fields, length, name);
+      else if (base_type == GLSL_TYPE_INTERFACE)
+         ret_type =
+            glsl_type::get_interface_instance(fields, length,
+                                              (glsl_interface_packing)
+                                              interface_packing, name);
+      /* Free allocated memory. */
+      for (unsigned k = 0; k < length; k++)
+         free((void *)fields[k].name);
+      ralloc_free(fields);
+
+      goto return_type;
+   }
+
+   /* Should not fall down here! */
+type_serialization_error:
+   assert(!"error deserializing glsl_type");
+   return glsl_type::error_type;
+
+return_type:
+   /* Store user type in to hash. */
+   _mesa_hash_table_insert(type_hash, _mesa_hash_string(name),
+                           (void*) (uintptr_t) type_id,
+                           (void*) ret_type);
+   return ret_type;
+}
+
+
+
+
 bool
 glsl_type::contains_sampler() const
 {

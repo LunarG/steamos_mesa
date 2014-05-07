@@ -83,6 +83,7 @@ enum glsl_interface_packing {
 #include "GL/gl.h"
 #include "ralloc.h"
 #include "memory_writer.h"
+#include "memory_map.h"
 
 struct glsl_type {
    GLenum gl_type;
@@ -130,6 +131,16 @@ struct glsl_type {
     * Serialization functionality used by binary shaders.
     */
    void serialize(memory_writer &mem) const;
+
+   /**
+    * Deserialization functionality used by binary shaders,
+    * state and type_hash are helper structures managed by the
+    * ir_deserializer class.
+    */
+   const glsl_type *deserialize(memory_map *map,
+                                struct _mesa_glsl_parse_state *state,
+                                struct hash_table *type_hash,
+                                uint32_t hash_value);
 
    /**
     * \name Vector and matrix element counts
@@ -678,6 +689,14 @@ struct glsl_struct_field {
     */
    unsigned sample:1;
 };
+
+/**
+ * Deserialization utility function used by the binary shaders, state and
+ * type_hash are mandatory helper structures managed by the caller.
+ */
+const glsl_type *
+deserialize_glsl_type(memory_map *map, struct _mesa_glsl_parse_state *state,
+                      struct hash_table *type_hash);
 
 static inline unsigned int
 glsl_align(unsigned int a, unsigned int align)

@@ -73,11 +73,23 @@ const uint32_t cache_validation_data[] = {
 extern "C" {
 #endif
 
+enum {
+   MESA_SHADER_DESERIALIZE_READ_ERROR = -1,
+   MESA_SHADER_DESERIALIZE_VERSION_ERROR = -2,
+};
+
 char *
 mesa_shader_serialize(struct gl_shader *shader, size_t *size);
 
 char *
 mesa_program_serialize(struct gl_shader_program *prog, size_t *size);
+
+struct gl_shader *
+mesa_shader_deserialize(void *mem_ctx, void *data, size_t size);
+
+int
+mesa_program_deserialize(struct gl_shader_program *prog, const GLvoid *data,
+                         size_t size);
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -105,6 +105,7 @@ LIBGLSL_FILES = \
 	$(GLSL_SRCDIR)/opt_vectorize.cpp \
 	$(GLSL_SRCDIR)/s_expression.cpp \
 	$(GLSL_SRCDIR)/shader_serialize.cpp \
+	$(GLSL_SRCDIR)/shader_deserialize.cpp \
 	$(GLSL_SRCDIR)/strtod.cpp \
 	$(GLSL_SRCDIR)/threadpool.c
 

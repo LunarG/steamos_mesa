@@ -163,6 +163,64 @@ glsl_type::glsl_type(const glsl_struct_field *fields, unsigned num_fields,
 }
 
 
+void
+glsl_type::serialize(memory_writer &mem) const
+{
+   uint32_t data_len = 0;
+
+   mem.write_string(name);
+
+   unsigned start_pos = mem.position();
+   mem.write_uint32_t(data_len);
+
+   /**
+    * Used to notify reader if a user defined type
+    * has been serialized before.
+    */
+   uint8_t user_type_exists = 0;
+
+   /* Serialize only user defined types. */
+   switch (base_type) {
+   case GLSL_TYPE_ARRAY:
+   case GLSL_TYPE_STRUCT:
+   case GLSL_TYPE_INTERFACE:
+      break;
+   default:
+      goto serialization_epilogue;
+   }
+
+   uint32_t type_id;
+   user_type_exists = mem.make_unique_id(this, &type_id);
+
+   mem.write_uint8_t(user_type_exists);
+   mem.write_uint32_t(type_id);
+
+   /* No need to write again. */
+   if (user_type_exists)
+      goto serialization_epilogue;
+
+   mem.write_uint32_t((uint32_t)length);
+   mem.write_uint8_t((uint8_t)base_type);
+   mem.write_uint8_t((uint8_t)interface_packing);
+
+   if (base_type == GLSL_TYPE_ARRAY) {
+      element_type()->serialize(mem);
+   } else {
+      glsl_struct_field *field = fields.structure;
+      for (unsigned i = 0; i < length; i++, field++) {
+         mem.write(field, sizeof(glsl_struct_field));
+         mem.write_string(field->name);
+         field->type->serialize(mem);
+      }
+   }
+
+serialization_epilogue:
+   /* Update the length of written data in 'start_pos'. */
+   data_len = mem.position() - start_pos - sizeof(data_len);
+   mem.overwrite(&data_len, sizeof(data_len), start_pos);
+}
+
+
 bool
 glsl_type::contains_sampler() const
 {

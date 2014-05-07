@@ -82,6 +82,7 @@ enum glsl_interface_packing {
 #ifdef __cplusplus
 #include "GL/gl.h"
 #include "ralloc.h"
+#include "memory_writer.h"
 
 struct glsl_type {
    GLenum gl_type;
@@ -124,6 +125,11 @@ struct glsl_type {
       ralloc_free(type);
       mtx_unlock(&glsl_type::mutex);
    }
+
+   /**
+    * Serialization functionality used by binary shaders.
+    */
+   void serialize(memory_writer &mem) const;
 
    /**
     * \name Vector and matrix element counts

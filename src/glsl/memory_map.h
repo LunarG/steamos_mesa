@@ -26,6 +26,14 @@
 #ifndef MEMORY_MAP_H
 #define MEMORY_MAP_H
 
+#include <fcntl.h>
+#include <unistd.h>
+
+#ifdef _POSIX_MAPPED_FILES
+#include <sys/mman.h>
+#include <sys/stat.h>
+#endif
+
 #include <stdint.h>
 #include <string.h>
 #include "ralloc.h"
@@ -35,19 +43,65 @@
 /**
  * Helper class to read data
  *
- * Class reads data from user given memory.
+ * Class can read either from user given memory or from a file. On Linux
+ * file reading wraps around the Posix functions for mapping a file into
+ * the process's address space. Other OS may need different implementation.
  */
 class memory_map
 {
 public:
    memory_map() :
       error(false),
+      mode(memory_map::READ_MEM),
       cache_size(0),
       cache_mmap(NULL),
       cache_mmap_p(NULL)
    {
-      /* only used by read_string() */
       mem_ctx = ralloc_context(NULL);
+   }
+
+   /* read from disk */
+   int map(const char *path)
+   {
+#ifdef _POSIX_MAPPED_FILES
+      struct stat stat_info;
+      if (stat(path, &stat_info) != 0)
+         return -1;
+
+      mode = memory_map::READ_MAP;
+      cache_size = stat_info.st_size;
+
+      int fd = open(path, O_RDONLY);
+      if (fd) {
+         cache_mmap_p = cache_mmap = (char *)
+            mmap(NULL, cache_size, PROT_READ, MAP_PRIVATE, fd, 0);
+         close(fd);
+         return (cache_mmap == MAP_FAILED) ? -1 : 0;
+      }
+#else
+      /* Implementation for systems without mmap(). */
+      FILE *in = fopen(path, "r");
+      if (in) {
+         fseek(in, 0, SEEK_END);
+         cache_size = ftell(in);
+         rewind(in);
+
+         cache_mmap = ralloc_array(mem_ctx, char, cache_size);
+
+         if (!cache_mmap)
+            return -1;
+
+         if (fread(cache_mmap, cache_size, 1, in) != 1) {
+            ralloc_free(cache_mmap);
+            cache_mmap = NULL;
+         }
+         cache_mmap_p = cache_mmap;
+         fclose(in);
+
+         return (cache_mmap == NULL) ? -1 : 0;
+      }
+#endif
+      return -1;
    }
 
    /* read from memory */
@@ -58,6 +112,11 @@ public:
    }
 
    ~memory_map() {
+#ifdef _POSIX_MAPPED_FILES
+      if (cache_mmap && mode == READ_MAP) {
+         munmap(cache_mmap, cache_size);
+      }
+#endif
       ralloc_free(mem_ctx);
    }
 
@@ -155,6 +214,13 @@ private:
    /* if errors have occured during reading */
    bool error;
 
+   /* specifies if we are reading mapped memory or user passed mem */
+   enum read_mode {
+      READ_MEM = 0,
+      READ_MAP
+   };
+
+   int32_t mode;
    unsigned cache_size;
    char *cache_mmap;
    char *cache_mmap_p;

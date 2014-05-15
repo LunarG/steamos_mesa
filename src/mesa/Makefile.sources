@@ -264,6 +264,7 @@ PROGRAM_FILES = \
 	$(SRCDIR)program/ir_to_mesa.cpp \
 	$(SRCDIR)program/program.c \
 	$(SRCDIR)program/program_parse_extra.c \
+	$(SRCDIR)program/prog_diskcache.c \
 	$(SRCDIR)program/prog_cache.c \
 	$(SRCDIR)program/prog_execute.c \
 	$(SRCDIR)program/prog_instruction.c \

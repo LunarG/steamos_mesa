@@ -91,6 +91,9 @@ int
 mesa_program_deserialize(struct gl_shader_program *prog, const GLvoid *data,
                          size_t size);
 
+int
+mesa_program_load(struct gl_shader_program *prog, const char *path);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

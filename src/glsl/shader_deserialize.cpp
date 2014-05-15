@@ -411,3 +411,21 @@ mesa_program_deserialize(struct gl_shader_program *prog, const GLvoid *data,
    map.map((const void*) data, size);
    return deserialize_program(prog, map);
 }
+
+
+extern "C" int
+mesa_program_load(struct gl_shader_program *prog, const char *path)
+{
+   memory_map map;
+   int result = 0;
+
+   if (map.map(path))
+      return -1;
+   result = deserialize_program(prog, map);
+
+   /* Cache binary produced with a different Mesa, remove it. */
+   if (result == MESA_SHADER_DESERIALIZE_VERSION_ERROR)
+      unlink(path);
+
+   return result;
+}

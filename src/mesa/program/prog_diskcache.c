@@ -26,6 +26,99 @@
 #include "shader_cache.h"
 #include "prog_diskcache.h"
 
+#ifndef _WIN32
+#include <dirent.h>
+
+#define MAX_CACHE_SIZE 100 * 1024 * 1024
+
+struct dir_entry_t
+{
+   char *path;
+   struct stat info;
+};
+
+
+static int
+sort_by_access_time(const void *_a, const void *_b)
+{
+   /* Compare access time of 2 entries */
+   struct dir_entry_t *a = (struct dir_entry_t *) _a;
+   struct dir_entry_t *b = (struct dir_entry_t *) _b;
+
+   if (a->info.st_atime > b->info.st_atime)
+      return 1;
+   return -1;
+}
+
+
+static int
+valid_cache_entry(const struct dirent *entry)
+{
+   /* Only regular files are possible valid cache entries. */
+   if (entry->d_type == DT_REG)
+      return 1;
+   return 0;
+}
+
+
+/**
+ * Cache size management. If cache size exceeds max_cache_size,
+ * entries are sorted by access time and oldest entries deleted
+ * until we fit.
+ */
+static void
+manage_cache_size(const char *path, const unsigned max_cache_size)
+{
+   struct dirent **entries;
+   int n = scandir(path, &entries, valid_cache_entry, NULL);
+
+   if (n <= 0)
+      return;
+
+   struct dir_entry_t *cache = NULL;
+   unsigned cache_size = 0;
+   unsigned cache_entries = 0;
+
+   void *mem_ctx = ralloc_context(NULL);
+
+   cache = ralloc_array(mem_ctx, struct dir_entry_t, n);
+
+   /* Construct entries with path and access information + calculate
+    * total size used by entries.
+    */
+   while (n--) {
+      cache[cache_entries].path =
+         ralloc_asprintf(mem_ctx, "%s/%s", path, entries[n]->d_name);
+      stat(cache[cache_entries].path, &cache[cache_entries].info);
+
+      cache_size += cache[cache_entries].info.st_size;
+
+      cache_entries++;
+      free(entries[n]);
+   }
+   free(entries);
+
+   /* No need to manage if we fit the max size. */
+   if (cache_size < max_cache_size)
+      goto free_allocated_memory;
+
+   /* Sort oldest first so we can 'delete until cache size less than max'. */
+   qsort(cache, cache_entries, sizeof(struct dir_entry_t), sort_by_access_time);
+
+   unsigned i = 0;
+   while (cache_size > max_cache_size && i < cache_entries) {
+      unlink(cache[i].path);
+      cache_size -= cache[i].info.st_size;
+      i++;
+   }
+
+free_allocated_memory:
+
+   ralloc_free(mem_ctx);
+}
+#endif
+
+
 static int
 mesa_mkdir_cache(const char *path)
 {
@@ -73,6 +166,10 @@ mesa_program_diskcache_init(struct gl_context *ctx)
    struct stat stat_info;
    if (stat(ctx->BinaryCachePath, &stat_info) != 0)
       result = mesa_mkdir_cache(ctx->BinaryCachePath);
+#ifndef _WIN32
+   else
+      manage_cache_size(ctx->BinaryCachePath, MAX_CACHE_SIZE);
+#endif
 
    if (result == 0)
       ctx->BinaryCacheActive = true;

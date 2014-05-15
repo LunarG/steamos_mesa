@@ -4287,6 +4287,12 @@ struct gl_context
 
    /* A thread pool for threaded shader compilation */
    struct _mesa_threadpool *ThreadPool;
+
+   /**
+    * Binary shader cache disk location.
+    */
+   char *BinaryCachePath;
+   GLboolean BinaryCacheActive;
 };
 
 

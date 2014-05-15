@@ -465,6 +465,24 @@ _mesa_little_endian(void)
    return *((const GLubyte *) &ui);
 }
 
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <errno.h>
+
+static inline int
+_mesa_mkdir(const char *path)
+{
+#ifdef _WIN32
+   if (_mkdir(path) != 0)
+      return errno;
+   return 0;
+#else
+   if (mkdir(path, 0775) != 0)
+      return errno;
+   return 0;
+#endif
+}
+
 
 
 /**********************************************************************

@@ -3091,6 +3091,8 @@ _mesa_glsl_link_shader(struct gl_context *ctx, struct gl_shader_program *prog)
    if (prog->LinkStatus) {
       if (!ctx->Driver.LinkShader(ctx, prog)) {
 	 prog->LinkStatus = GL_FALSE;
+      } else {
+         prog->_Linked = GL_TRUE;
       }
    }
 

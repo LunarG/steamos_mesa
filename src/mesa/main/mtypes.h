@@ -2757,6 +2757,7 @@ struct gl_shader_program
    GLboolean LinkStatus;   /**< GL_LINK_STATUS */
    GLboolean Validated;
    GLboolean _Used;        /**< Ever used for drawing? */
+   GLboolean _Linked;      /**< Ever linked? */
    GLchar *InfoLog;
 
    unsigned Version;       /**< GLSL version used for linking */

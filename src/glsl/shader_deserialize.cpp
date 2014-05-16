@@ -395,6 +395,8 @@ deserialize_program(struct gl_shader_program *prog, memory_map &map)
    /* set default values for uniforms that have initializer */
    link_set_uniform_initializers(prog);
 
+   prog->_Linked = GL_TRUE;
+
    return 0;
 }
 

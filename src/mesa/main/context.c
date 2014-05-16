@@ -132,6 +132,7 @@
 #include "vtxfmt.h"
 #include "program/program.h"
 #include "program/prog_print.h"
+#include "program/prog_diskcache.h"
 #include "math/m_matrix.h"
 #include "main/dispatch.h" /* for _gloffset_COUNT */
 
@@ -995,6 +996,7 @@ _mesa_initialize_dispatch_tables(struct gl_context *ctx)
       _mesa_initialize_save_table(ctx);
 }
 
+
 /**
  * Initialize a struct gl_context struct (rendering context).
  *
@@ -1137,6 +1139,8 @@ _mesa_initialize_context(struct gl_context *ctx,
    }
 
    ctx->FirstTimeCurrent = GL_TRUE;
+
+   mesa_program_diskcache_init(ctx);
 
    return GL_TRUE;
 

@@ -55,6 +55,7 @@ extern "C" {
 #include "program/program.h"
 #include "program/prog_parameter.h"
 #include "program/sampler.h"
+#include "program/prog_diskcache.h"
 }
 
 static int swizzle_for_size(int size);
@@ -3084,6 +3085,10 @@ _mesa_glsl_link_shader(struct gl_context *ctx, struct gl_shader_program *prog)
       }
    }
 
+   /* Search program disk cache if active. */
+   if (ctx->BinaryCacheActive && mesa_program_diskcache_find(prog) == 0)
+      return;
+
    if (prog->LinkStatus) {
       link_shaders(ctx, prog);
    }
@@ -3092,6 +3097,8 @@ _mesa_glsl_link_shader(struct gl_context *ctx, struct gl_shader_program *prog)
       if (!ctx->Driver.LinkShader(ctx, prog)) {
 	 prog->LinkStatus = GL_FALSE;
       } else {
+         if (ctx->BinaryCacheActive)
+            mesa_program_diskcache_cache(prog);
          prog->_Linked = GL_TRUE;
       }
    }

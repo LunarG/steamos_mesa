@@ -61,6 +61,10 @@ void get_bitmap_visitor(struct st_fragment_program *fp,
                         struct glsl_to_tgsi_visitor *original,
                         int samplerIndex);
 
+struct gl_program* _st_ir_get_program(struct gl_context *ctx,
+                                      struct gl_shader_program *shader_program,
+                                      struct gl_shader *shader);
+
 struct gl_shader *st_new_shader(struct gl_context *ctx, GLuint name, GLuint type);
 
 struct gl_shader_program *

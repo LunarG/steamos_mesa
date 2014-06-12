@@ -2790,10 +2790,10 @@ ir_to_mesa_visitor::copy_propagate(void)
 /**
  * Convert a shader's GLSL IR into a Mesa gl_program.
  */
-static struct gl_program *
-get_mesa_program(struct gl_context *ctx,
-                 struct gl_shader_program *shader_program,
-		 struct gl_shader *shader)
+struct gl_program *
+_mesa_ir_get_program(struct gl_context *ctx,
+                     struct gl_shader_program *shader_program,
+                     struct gl_shader *shader)
 {
    ir_to_mesa_visitor v;
    struct prog_instruction *mesa_instructions, *mesa_inst;
@@ -3046,7 +3046,7 @@ _mesa_ir_link_shader(struct gl_context *ctx, struct gl_shader_program *prog)
       if (prog->_LinkedShaders[i] == NULL)
 	 continue;
 
-      linked_prog = get_mesa_program(ctx, prog, prog->_LinkedShaders[i]);
+      linked_prog = _mesa_ir_get_program(ctx, prog, prog->_LinkedShaders[i]);
 
       if (linked_prog) {
          _mesa_copy_linked_program_data((gl_shader_stage) i, prog, linked_prog);

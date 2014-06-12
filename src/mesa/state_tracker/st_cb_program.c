@@ -245,4 +245,5 @@ st_init_program_functions(struct dd_function_table *functions)
    functions->NewShader = st_new_shader;
    functions->NewShaderProgram = st_new_shader_program;
    functions->LinkShader = st_link_shader;
+   functions->GetProgram = _st_ir_get_program;
 }

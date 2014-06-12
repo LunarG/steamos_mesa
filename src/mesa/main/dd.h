@@ -419,6 +419,10 @@ struct dd_function_table {
    /** Allocate a new program */
    struct gl_program * (*NewProgram)(struct gl_context *ctx, GLenum target,
                                      GLuint id);
+   /** Construct gl_program for a shader. */
+   struct gl_program * (*GetProgram) (struct gl_context *ctx,
+                                      struct gl_shader_program *shader_program,
+                                      struct gl_shader *shader);
    /** Delete a program */
    void (*DeleteProgram)(struct gl_context *ctx, struct gl_program *prog);   
    /**

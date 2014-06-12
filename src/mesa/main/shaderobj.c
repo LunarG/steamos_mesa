@@ -499,4 +499,5 @@ _mesa_init_shader_object_functions(struct dd_function_table *driver)
    driver->NewShaderProgram = _mesa_new_shader_program;
    driver->DeleteShaderProgram = _mesa_delete_shader_program;
    driver->LinkShader = _mesa_ir_link_shader;
+   driver->GetProgram = _mesa_ir_get_program;
 }

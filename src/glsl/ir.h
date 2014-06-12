@@ -35,6 +35,7 @@
 #include "ir_visitor.h"
 #include "ir_hierarchical_visitor.h"
 #include "main/mtypes.h"
+#include "memory_writer.h"
 
 #ifdef __cplusplus
 
@@ -108,6 +109,10 @@ public:
    void print(void) const;
    void fprint(FILE *f) const;
 
+   /* serialization */
+   void serialize(memory_writer &mem);
+   virtual void serialize_data(memory_writer &mem) = 0;
+
    virtual void accept(ir_visitor *) = 0;
    virtual ir_visitor_status accept(ir_hierarchical_visitor *) = 0;
    virtual ir_instruction *clone(void *mem_ctx,
@@ -167,6 +172,8 @@ public:
    const struct glsl_type *type;
 
    virtual ir_rvalue *clone(void *mem_ctx, struct hash_table *) const;
+
+   virtual void serialize_data(memory_writer &mem);
 
    virtual void accept(ir_visitor *v)
    {
@@ -391,6 +398,8 @@ public:
    {
       v->visit(this);
    }
+
+   virtual void serialize_data(memory_writer &mem);
 
    virtual ir_visitor_status accept(ir_hierarchical_visitor *);
 
@@ -791,6 +800,8 @@ public:
    ir_function_signature *clone_prototype(void *mem_ctx,
 					  struct hash_table *ht) const;
 
+   virtual void serialize_data(memory_writer &mem);
+
    virtual void accept(ir_visitor *v)
    {
       v->visit(this);
@@ -922,6 +933,8 @@ public:
       return this;
    }
 
+   virtual void serialize_data(memory_writer &mem);
+
    virtual void accept(ir_visitor *v)
    {
       v->visit(this);
@@ -1002,6 +1015,8 @@ public:
    }
 
    virtual ir_visitor_status accept(ir_hierarchical_visitor *);
+   virtual void serialize_data(memory_writer &mem);
+
 
    ir_rvalue *condition;
    /** List of ir_instruction for the body of the then branch */
@@ -1019,6 +1034,8 @@ public:
    ir_loop();
 
    virtual ir_loop *clone(void *mem_ctx, struct hash_table *ht) const;
+
+   virtual void serialize_data(memory_writer &mem);
 
    virtual void accept(ir_visitor *v)
    {
@@ -1052,6 +1069,8 @@ public:
 		 unsigned write_mask);
 
    virtual ir_assignment *clone(void *mem_ctx, struct hash_table *ht) const;
+
+   virtual void serialize_data(memory_writer &mem);
 
    virtual ir_constant *constant_expression_value(struct hash_table *variable_context = NULL);
 
@@ -1439,6 +1458,8 @@ public:
 
    virtual ir_expression *clone(void *mem_ctx, struct hash_table *ht) const;
 
+   virtual void serialize_data(memory_writer &mem);
+
    /**
     * Attempt to constant-fold the expression
     *
@@ -1523,6 +1544,8 @@ public:
    }
 
    virtual ir_call *clone(void *mem_ctx, struct hash_table *ht) const;
+
+   virtual void serialize_data(memory_writer &mem);
 
    virtual ir_constant *constant_expression_value(struct hash_table *variable_context = NULL);
 
@@ -1625,6 +1648,8 @@ public:
    virtual ir_visitor_status accept(ir_hierarchical_visitor *);
 
    ir_rvalue *value;
+   virtual void serialize_data(memory_writer &mem);
+
 };
 
 
@@ -1650,6 +1675,8 @@ public:
    }
 
    virtual ir_loop_jump *clone(void *mem_ctx, struct hash_table *) const;
+
+   virtual void serialize_data(memory_writer &mem);
 
    virtual void accept(ir_visitor *v)
    {
@@ -1690,6 +1717,8 @@ public:
    }
 
    virtual ir_discard *clone(void *mem_ctx, struct hash_table *ht) const;
+
+   virtual void serialize_data(memory_writer &mem);
 
    virtual void accept(ir_visitor *v)
    {
@@ -1760,6 +1789,8 @@ public:
    }
 
    virtual ir_texture *clone(void *mem_ctx, struct hash_table *) const;
+
+   virtual void serialize_data(memory_writer &mem);
 
    virtual ir_constant *constant_expression_value(struct hash_table *variable_context = NULL);
 
@@ -1862,6 +1893,8 @@ public:
 
    virtual ir_swizzle *clone(void *mem_ctx, struct hash_table *) const;
 
+   virtual void serialize_data(memory_writer &mem);
+
    virtual ir_constant *constant_expression_value(struct hash_table *variable_context = NULL);
 
    virtual ir_swizzle *as_swizzle()
@@ -1931,6 +1964,8 @@ public:
    virtual ir_dereference_variable *clone(void *mem_ctx,
 					  struct hash_table *) const;
 
+   virtual void serialize_data(memory_writer &mem);
+
    virtual ir_constant *constant_expression_value(struct hash_table *variable_context = NULL);
 
    virtual ir_dereference_variable *as_dereference_variable()
@@ -1982,6 +2017,8 @@ public:
    virtual ir_dereference_array *clone(void *mem_ctx,
 				       struct hash_table *) const;
 
+   virtual void serialize_data(memory_writer &mem);
+
    virtual ir_constant *constant_expression_value(struct hash_table *variable_context = NULL);
 
    virtual ir_dereference_array *as_dereference_array()
@@ -2022,6 +2059,8 @@ public:
 
    virtual ir_dereference_record *clone(void *mem_ctx,
 					struct hash_table *) const;
+
+   virtual void serialize_data(memory_writer &mem);
 
    virtual ir_constant *constant_expression_value(struct hash_table *variable_context = NULL);
 
@@ -2092,6 +2131,8 @@ public:
    static ir_constant *zero(void *mem_ctx, const glsl_type *type);
 
    virtual ir_constant *clone(void *mem_ctx, struct hash_table *) const;
+
+   virtual void serialize_data(memory_writer &mem);
 
    virtual ir_constant *constant_expression_value(struct hash_table *variable_context = NULL);
 
@@ -2221,6 +2262,8 @@ public:
       return new(mem_ctx) ir_emit_vertex();
    }
 
+   virtual void serialize_data(memory_writer &mem);
+
    virtual ir_visitor_status accept(ir_hierarchical_visitor *);
 };
 
@@ -2244,6 +2287,8 @@ public:
    {
       return new(mem_ctx) ir_end_primitive();
    }
+
+   virtual void serialize_data(memory_writer &mem);
 
    virtual ir_visitor_status accept(ir_hierarchical_visitor *);
 };

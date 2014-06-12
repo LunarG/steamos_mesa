@@ -45,6 +45,7 @@ LIBGLSL_FILES = \
 	$(GLSL_SRCDIR)/ir_reader.cpp \
 	$(GLSL_SRCDIR)/ir_rvalue_visitor.cpp \
 	$(GLSL_SRCDIR)/ir_set_program_inouts.cpp \
+	$(GLSL_SRCDIR)/ir_serialize.cpp \
 	$(GLSL_SRCDIR)/ir_validate.cpp \
 	$(GLSL_SRCDIR)/ir_variable_refcount.cpp \
 	$(GLSL_SRCDIR)/linker.cpp \

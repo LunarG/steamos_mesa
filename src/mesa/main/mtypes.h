@@ -71,6 +71,8 @@ typedef GLuint64 GLbitfield64;
  */
 /*@{*/
 struct _mesa_HashTable;
+struct _mesa_threadpool;
+struct _mesa_threadpool_task;
 struct gl_attrib_node;
 struct gl_list_extensions;
 struct gl_meta_state;
@@ -2506,6 +2508,14 @@ struct gl_shader
        */
       unsigned LocalSize[3];
    } Comp;
+
+   /**
+    * Deferred task of glCompileShader.  We should extend the mutex, not only
+    * to protect the deferred task, but to protect the entire gl_shader.
+    */
+   mtx_t Mutex;
+   struct _mesa_threadpool_task *Task;
+   void *TaskData;
 };
 
 
@@ -2765,6 +2775,15 @@ struct gl_shader_program
     * #extension ARB_fragment_coord_conventions: enable
     */
    GLboolean ARB_fragment_coord_conventions_enable;
+
+   /**
+    * Deferred task of glLinkProgram.  We should extend the mutex, not only
+    * to protect the deferred task, but to protect the entire
+    * gl_shader_program.
+    */
+   mtx_t Mutex;
+   struct _mesa_threadpool_task *Task;
+   void *TaskData;
 };   
 
 
@@ -3481,6 +3500,18 @@ struct gl_constants
    GLfloat MaxFragmentInterpolationOffset;
 
    GLboolean FakeSWMSAA;
+
+   /*
+    * Defer certain operations to a thread pool.
+    *
+    * When DeferLinkProgram is set, these functions must be thread-safe
+    *
+    *   ctx->Driver.NewShader
+    *   ctx->Driver.DeleteShader
+    *   ctx->Driver.LinkShader
+    */
+   GLboolean DeferCompileShader;
+   GLboolean DeferLinkProgram;
 };
 
 
@@ -4252,6 +4283,9 @@ struct gl_context
     * Once this field becomes true, it is never reset to false.
     */
    GLboolean ShareGroupReset;
+
+   /* A thread pool for threaded shader compilation */
+   struct _mesa_threadpool *ThreadPool;
 };
 
 

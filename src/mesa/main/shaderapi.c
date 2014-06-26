@@ -53,6 +53,7 @@
 #include "program/prog_print.h"
 #include "program/prog_parameter.h"
 #include "ralloc.h"
+#include "threadpool.h"
 #include <stdbool.h>
 #include "../glsl/glsl_parser_extras.h"
 #include "../glsl/ir.h"
@@ -210,7 +211,8 @@ _mesa_validate_shader_target(const struct gl_context *ctx, GLenum type)
 static GLboolean
 is_program(struct gl_context *ctx, GLuint name)
 {
-   struct gl_shader_program *shProg = _mesa_lookup_shader_program(ctx, name);
+   struct gl_shader_program *shProg =
+      _mesa_lookup_shader_program_no_wait(ctx, name);
    return shProg ? GL_TRUE : GL_FALSE;
 }
 
@@ -218,7 +220,7 @@ is_program(struct gl_context *ctx, GLuint name)
 static GLboolean
 is_shader(struct gl_context *ctx, GLuint name)
 {
-   struct gl_shader *shader = _mesa_lookup_shader(ctx, name);
+   struct gl_shader *shader = _mesa_lookup_shader_no_wait(ctx, name);
    return shader ? GL_TRUE : GL_FALSE;
 }
 
@@ -239,7 +241,7 @@ attach_shader(struct gl_context *ctx, GLuint program, GLuint shader)
    if (!shProg)
       return;
 
-   sh = _mesa_lookup_shader_err(ctx, shader, "glAttachShader");
+   sh = _mesa_lookup_shader_err_no_wait(ctx, shader, "glAttachShader");
    if (!sh) {
       return;
    }
@@ -341,7 +343,9 @@ delete_shader_program(struct gl_context *ctx, GLuint name)
     */
    struct gl_shader_program *shProg;
 
-   shProg = _mesa_lookup_shader_program_err(ctx, name, "glDeleteProgram");
+   /* no waiting until _mesa_delete_shader_program() */
+   shProg = _mesa_lookup_shader_program_err_no_wait(ctx, name,
+                                                    "glDeleteProgram");
    if (!shProg)
       return;
 
@@ -359,7 +363,8 @@ delete_shader(struct gl_context *ctx, GLuint shader)
 {
    struct gl_shader *sh;
 
-   sh = _mesa_lookup_shader_err(ctx, shader, "glDeleteShader");
+   /* no waiting until _mesa_delete_shader() */
+   sh = _mesa_lookup_shader_err_no_wait(ctx, shader, "glDeleteShader");
    if (!sh)
       return;
 
@@ -812,6 +817,48 @@ shader_source(struct gl_context *ctx, GLuint shader, const GLchar *source)
 #endif
 }
 
+static bool
+can_queue_task(struct gl_context *ctx)
+{
+   if (!ctx->ThreadPool)
+      return false;
+
+   /* MESA_GLSL is set */
+   if (ctx->_Shader->Flags)
+      return false;
+
+   /* context requires synchronized compiler warnings and errors */
+   if (_mesa_get_debug_state_int(ctx, GL_DEBUG_OUTPUT_SYNCHRONOUS_ARB))
+      return false;
+
+   return true;
+}
+
+static void
+deferred_compile_shader(void *data)
+{
+   struct gl_shader *sh = (struct gl_shader *) data;
+   struct gl_context *ctx = (struct gl_context *) sh->TaskData;
+
+   _mesa_glsl_compile_shader(ctx, sh, false, false);
+}
+
+static bool
+queue_compile_shader(struct gl_context *ctx, struct gl_shader *sh)
+{
+   if (!can_queue_task(ctx))
+      return false;
+   if (!ctx->Const.DeferCompileShader)
+      return false;
+
+   sh->TaskData = (void *) ctx;
+   sh->Task = _mesa_threadpool_queue_task(ctx->ThreadPool,
+         deferred_compile_shader, (void *) sh);
+   if (!sh->Task)
+      sh->TaskData = NULL;
+
+   return (sh->Task != NULL);
+}
 
 /**
  * Compile a shader.
@@ -844,10 +891,12 @@ compile_shader(struct gl_context *ctx, GLuint shaderObj)
          fflush(stderr);
       }
 
-      /* this call will set the shader->CompileStatus field to indicate if
-       * compilation was successful.
+      /* This call will set the shader->CompileStatus field to indicate if
+       * compilation was successful.  But if queueing succeeded, the field
+       * will be set at a later point.
        */
-      _mesa_glsl_compile_shader(ctx, sh, false, false);
+      if (!queue_compile_shader(ctx, sh))
+         _mesa_glsl_compile_shader(ctx, sh, false, false);
 
       if (ctx->_Shader->Flags & GLSL_LOG) {
          _mesa_write_shader_to_file(sh);
@@ -870,7 +919,7 @@ compile_shader(struct gl_context *ctx, GLuint shaderObj)
 
    }
 
-   if (!sh->CompileStatus) {
+   if (ctx->_Shader->Flags && !sh->CompileStatus) {
       if (ctx->_Shader->Flags & GLSL_DUMP_ON_ERROR) {
          fprintf(stderr, "GLSL source for %s shader %d:\n",
                  _mesa_shader_stage_to_string(sh->Stage), sh->Name);
@@ -886,6 +935,49 @@ compile_shader(struct gl_context *ctx, GLuint shaderObj)
    }
 }
 
+
+static void
+deferred_link_program(void *data)
+{
+   struct gl_shader_program *shProg = (struct gl_shader_program *) data;
+   struct gl_context *ctx = (struct gl_context *) shProg->TaskData;
+
+   _mesa_wait_shaders(ctx, shProg->Shaders, shProg->NumShaders);
+   _mesa_glsl_link_shader(ctx, shProg);
+}
+
+static bool
+queue_link_program(struct gl_context *ctx, struct gl_shader_program *shProg)
+{
+   int i;
+
+   if (!can_queue_task(ctx))
+      return false;
+   if (!ctx->Const.DeferLinkProgram)
+      return false;
+
+   /*
+    * Rather than adding _mesa_wait_shader_program calls here and there, we
+    * simply disallow threaded linking when the program is current or active.
+    */
+   if (ctx->_Shader->ActiveProgram == shProg)
+      return false;
+   /* be careful for separate programs */
+   if (ctx->_Shader->Name != 0) {
+      for (i = 0; i < MESA_SHADER_STAGES; i++) {
+         if (ctx->_Shader->CurrentProgram[i] == shProg)
+            return false;
+      }
+   }
+
+   shProg->TaskData = (void *) ctx;
+   shProg->Task = _mesa_threadpool_queue_task(ctx->ThreadPool,
+         deferred_link_program, (void *) shProg);
+   if (!shProg->Task)
+      shProg->TaskData = NULL;
+
+   return (shProg->Task != NULL);
+}
 
 /**
  * Link a program's shaders.
@@ -912,10 +1004,16 @@ link_program(struct gl_context *ctx, GLuint program)
 
    FLUSH_VERTICES(ctx, _NEW_PROGRAM);
 
-   _mesa_glsl_link_shader(ctx, shProg);
+   if (ctx->Driver.NotifyLinkShader)
+      ctx->Driver.NotifyLinkShader(ctx, shProg);
 
-   if (shProg->LinkStatus == GL_FALSE && 
-       (ctx->_Shader->Flags & GLSL_REPORT_ERRORS)) {
+   if (!queue_link_program(ctx, shProg)) {
+      _mesa_wait_shaders(ctx, shProg->Shaders, shProg->NumShaders);
+      _mesa_glsl_link_shader(ctx, shProg);
+   }
+
+   if ((ctx->_Shader->Flags & GLSL_REPORT_ERRORS) &&
+       shProg->LinkStatus == GL_FALSE) {
       _mesa_debug(ctx, "Error linking program %u:\n%s\n",
                   shProg->Name, shProg->InfoLog);
    }

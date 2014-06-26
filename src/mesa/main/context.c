@@ -112,6 +112,7 @@
 #include "points.h"
 #include "polygon.h"
 #include "queryobj.h"
+#include "shaderapi.h"
 #include "syncobj.h"
 #include "rastpos.h"
 #include "remap.h"
@@ -139,6 +140,7 @@
 #endif
 
 #include "glsl_parser_extras.h"
+#include "threadpool.h"
 #include <stdbool.h>
 
 
@@ -1184,6 +1186,27 @@ _mesa_create_context(gl_api api,
    }
 }
 
+void
+_mesa_enable_glsl_threadpool(struct gl_context *ctx, int max_threads)
+{
+   if (!ctx->ThreadPool)
+      ctx->ThreadPool = _mesa_glsl_get_threadpool(max_threads);
+}
+
+static void
+wait_shader_object_cb(GLuint id, void *data, void *userData)
+{
+   struct gl_context *ctx = (struct gl_context *) userData;
+   struct gl_shader *sh = (struct gl_shader *) data;
+
+   if (_mesa_validate_shader_target(ctx, sh->Type)) {
+      _mesa_wait_shaders(ctx, &sh, 1);
+   }
+   else {
+      struct gl_shader_program *shProg = (struct gl_shader_program *) data;
+      _mesa_wait_shader_program(ctx, shProg);
+   }
+}
 
 /**
  * Free the data associated with the given context.
@@ -1200,6 +1223,12 @@ _mesa_free_context_data( struct gl_context *ctx )
        * texture objs, etc.  So temporarily bind the context now.
        */
       _mesa_make_current(ctx, NULL, NULL);
+   }
+
+   if (ctx->ThreadPool) {
+      _mesa_HashWalk(ctx->Shared->ShaderObjects, wait_shader_object_cb, ctx);
+      _mesa_threadpool_unref(ctx->ThreadPool);
+      ctx->ThreadPool = NULL;
    }
 
    /* unreference WinSysDraw/Read buffers */

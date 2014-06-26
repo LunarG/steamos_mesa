@@ -53,13 +53,35 @@ extern void
 _mesa_reference_shader(struct gl_context *ctx, struct gl_shader **ptr,
                        struct gl_shader *sh);
 
-extern struct gl_shader *
-_mesa_lookup_shader(struct gl_context *ctx, GLuint name);
+extern void
+_mesa_wait_shaders(struct gl_context *ctx,
+                   struct gl_shader **shaders,
+                   int num_shaders);
 
 extern struct gl_shader *
-_mesa_lookup_shader_err(struct gl_context *ctx, GLuint name, const char *caller);
+_mesa_lookup_shader_no_wait(struct gl_context *ctx, GLuint name);
 
+extern struct gl_shader *
+_mesa_lookup_shader_err_no_wait(struct gl_context *ctx, GLuint name,
+                                const char *caller);
 
+static inline struct gl_shader *
+_mesa_lookup_shader(struct gl_context *ctx, GLuint name)
+{
+   struct gl_shader *sh = _mesa_lookup_shader_no_wait(ctx, name);
+   if (sh)
+      _mesa_wait_shaders(ctx, &sh, 1);
+   return sh;
+}
+
+static inline struct gl_shader *
+_mesa_lookup_shader_err(struct gl_context *ctx, GLuint name, const char *caller)
+{
+   struct gl_shader *sh = _mesa_lookup_shader_err_no_wait(ctx, name, caller);
+   if (sh)
+      _mesa_wait_shaders(ctx, &sh, 1);
+   return sh;
+}
 
 extern void
 _mesa_reference_shader_program(struct gl_context *ctx,
@@ -74,12 +96,37 @@ _mesa_new_shader(struct gl_context *ctx, GLuint name, GLenum type);
 extern void
 _mesa_init_shader_program(struct gl_context *ctx, struct gl_shader_program *prog);
 
-extern struct gl_shader_program *
-_mesa_lookup_shader_program(struct gl_context *ctx, GLuint name);
+extern void
+_mesa_wait_shader_program(struct gl_context *ctx,
+                          struct gl_shader_program *shProg);
 
 extern struct gl_shader_program *
+_mesa_lookup_shader_program_no_wait(struct gl_context *ctx, GLuint name);
+
+extern struct gl_shader_program *
+_mesa_lookup_shader_program_err_no_wait(struct gl_context *ctx, GLuint name,
+                                        const char *caller);
+
+static inline struct gl_shader_program *
+_mesa_lookup_shader_program(struct gl_context *ctx, GLuint name)
+{
+   struct gl_shader_program *shProg =
+      _mesa_lookup_shader_program_no_wait(ctx, name);
+   if (shProg)
+      _mesa_wait_shader_program(ctx, shProg);
+   return shProg;
+}
+
+static inline struct gl_shader_program *
 _mesa_lookup_shader_program_err(struct gl_context *ctx, GLuint name,
-                                const char *caller);
+                                const char *caller)
+{
+   struct gl_shader_program *shProg =
+      _mesa_lookup_shader_program_err_no_wait(ctx, name, caller);
+   if (shProg)
+      _mesa_wait_shader_program(ctx, shProg);
+   return shProg;
+}
 
 extern void
 _mesa_clear_shader_program_data(struct gl_context *ctx,

@@ -41,6 +41,7 @@
 #include "program/prog_parameter.h"
 #include "program/hash_table.h"
 #include "ralloc.h"
+#include "threadpool.h"
 
 /**********************************************************************/
 /*** Shader object functions                                        ***/
@@ -95,6 +96,7 @@ _mesa_reference_shader(struct gl_context *ctx, struct gl_shader **ptr,
 void
 _mesa_init_shader(struct gl_context *ctx, struct gl_shader *shader)
 {
+   mtx_init(&shader->Mutex, mtx_plain);
    shader->RefCount = 1;
 }
 
@@ -125,10 +127,43 @@ _mesa_new_shader(struct gl_context *ctx, GLuint name, GLenum type)
 static void
 _mesa_delete_shader(struct gl_context *ctx, struct gl_shader *sh)
 {
+   _mesa_wait_shaders(ctx, &sh, 1);
+
    free((void *)sh->Source);
    free(sh->Label);
    _mesa_reference_program(ctx, &sh->Program, NULL);
+   mtx_destroy(&sh->Mutex);
    ralloc_free(sh);
+}
+
+
+/**
+ * Wait for the threaded compile tasks to complete.
+ */
+void
+_mesa_wait_shaders(struct gl_context *ctx,
+                   struct gl_shader **shaders,
+                   int num_shaders)
+{
+   int i;
+
+   for (i = 0; i < num_shaders; i++) {
+      struct gl_shader *sh = shaders[i];
+
+      mtx_lock(&sh->Mutex);
+
+      if (sh->Task) {
+         struct gl_context *task_ctx = (struct gl_context *) sh->TaskData;
+
+         if (!_mesa_threadpool_complete_task(task_ctx->ThreadPool, sh->Task))
+            sh->CompileStatus = GL_FALSE;
+
+         sh->Task = NULL;
+         sh->TaskData = NULL;
+      }
+
+      mtx_unlock(&sh->Mutex);
+   }
 }
 
 
@@ -136,7 +171,7 @@ _mesa_delete_shader(struct gl_context *ctx, struct gl_shader *sh)
  * Lookup a GLSL shader object.
  */
 struct gl_shader *
-_mesa_lookup_shader(struct gl_context *ctx, GLuint name)
+_mesa_lookup_shader_no_wait(struct gl_context *ctx, GLuint name)
 {
    if (name) {
       struct gl_shader *sh = (struct gl_shader *)
@@ -158,7 +193,8 @@ _mesa_lookup_shader(struct gl_context *ctx, GLuint name)
  * As above, but record an error if shader is not found.
  */
 struct gl_shader *
-_mesa_lookup_shader_err(struct gl_context *ctx, GLuint name, const char *caller)
+_mesa_lookup_shader_err_no_wait(struct gl_context *ctx, GLuint name,
+                                const char *caller)
 {
    if (!name) {
       _mesa_error(ctx, GL_INVALID_VALUE, "%s", caller);
@@ -238,6 +274,8 @@ _mesa_reference_shader_program(struct gl_context *ctx,
 void
 _mesa_init_shader_program(struct gl_context *ctx, struct gl_shader_program *prog)
 {
+   mtx_init(&prog->Mutex, mtx_plain);
+
    prog->Type = GL_SHADER_PROGRAM_MESA;
    prog->RefCount = 1;
 
@@ -371,9 +409,35 @@ _mesa_free_shader_program_data(struct gl_context *ctx,
 static void
 _mesa_delete_shader_program(struct gl_context *ctx, struct gl_shader_program *shProg)
 {
+   _mesa_wait_shader_program(ctx, shProg);
+
    _mesa_free_shader_program_data(ctx, shProg);
+   mtx_destroy(&shProg->Mutex);
 
    ralloc_free(shProg);
+}
+
+
+/**
+ * Wait for the threaded linking task to complete.
+ */
+void
+_mesa_wait_shader_program(struct gl_context *ctx,
+                          struct gl_shader_program *shProg)
+{
+   mtx_lock(&shProg->Mutex);
+
+   if (shProg->Task) {
+      struct gl_context *task_ctx = (struct gl_context *) shProg->TaskData;
+
+      if (!_mesa_threadpool_complete_task(task_ctx->ThreadPool,
+                                          shProg->Task))
+         shProg->LinkStatus = GL_FALSE;
+      shProg->Task = NULL;
+      shProg->TaskData = NULL;
+   }
+
+   mtx_unlock(&shProg->Mutex);
 }
 
 
@@ -381,7 +445,7 @@ _mesa_delete_shader_program(struct gl_context *ctx, struct gl_shader_program *sh
  * Lookup a GLSL program object.
  */
 struct gl_shader_program *
-_mesa_lookup_shader_program(struct gl_context *ctx, GLuint name)
+_mesa_lookup_shader_program_no_wait(struct gl_context *ctx, GLuint name)
 {
    struct gl_shader_program *shProg;
    if (name) {
@@ -404,8 +468,8 @@ _mesa_lookup_shader_program(struct gl_context *ctx, GLuint name)
  * As above, but record an error if program is not found.
  */
 struct gl_shader_program *
-_mesa_lookup_shader_program_err(struct gl_context *ctx, GLuint name,
-                                const char *caller)
+_mesa_lookup_shader_program_err_no_wait(struct gl_context *ctx, GLuint name,
+                                        const char *caller)
 {
    if (!name) {
       _mesa_error(ctx, GL_INVALID_VALUE, "%s", caller);

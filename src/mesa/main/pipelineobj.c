@@ -211,6 +211,24 @@ _mesa_reference_pipeline_object_(struct gl_context *ctx,
       }
       else {
          obj->RefCount++;
+
+         /*
+          * The current pipeline object (as set by glUseProgram or
+          * glBindProgramPipeline) cannot have unfinished tasks.
+          */
+         if (ptr == &ctx->_Shader) {
+            if (obj->ActiveProgram)
+               _mesa_wait_shader_program(ctx, obj->ActiveProgram);
+            if (obj->Name) {
+               int i;
+
+               for (i = 0; i < MESA_SHADER_STAGES; i++) {
+                  if (obj->CurrentProgram[i])
+                     _mesa_wait_shader_program(ctx, obj->CurrentProgram[i]);
+               }
+            }
+         }
+
          *ptr = obj;
       }
       mtx_unlock(&obj->Mutex);

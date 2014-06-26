@@ -447,6 +447,14 @@ struct dd_function_table {
     */
    /*@{*/
    /**
+    * Called when a shader program is to be linked.
+    *
+    * This is optional and gives drivers an opportunity to inspect the context
+    * and prepare for LinkShader, which may be deferred to another thread.
+    */
+   void (*NotifyLinkShader)(struct gl_context *ctx,
+                            struct gl_shader_program *shader);
+   /**
     * Called when a shader program is linked.
     *
     * This gives drivers an opportunity to clone the IR and make their

@@ -135,6 +135,100 @@ brw_wm_prog_data_compare(const void *in_a, const void *in_b)
    return true;
 }
 
+struct brw_wm_compile *
+brw_wm_init_compile(struct brw_context *brw,
+		    struct gl_shader_program *prog,
+		    struct brw_fragment_program *fp,
+		    const struct brw_wm_prog_key *key)
+{
+   struct brw_wm_compile *c;
+
+   c = rzalloc(NULL, struct brw_wm_compile);
+   if (!c)
+      return NULL;
+
+   c->shader_prog = prog;
+   c->fp = fp;
+   c->key = *key;
+
+   return c;
+}
+
+bool
+brw_wm_do_compile(struct brw_context *brw,
+                  struct brw_wm_compile *c)
+{
+   struct gl_context *ctx = &brw->ctx;
+   struct gl_shader *fs = NULL;
+
+   if (c->shader_prog)
+      fs = c->shader_prog->_LinkedShaders[MESA_SHADER_FRAGMENT];
+
+   /* Allocate the references to the uniforms that will end up in the
+    * prog_data associated with the compiled program, and which will be freed
+    * by the state cache.
+    */
+   int param_count;
+   if (fs) {
+      param_count = fs->num_uniform_components;
+   } else {
+      param_count = c->fp->program.Base.Parameters->NumParameters * 4;
+   }
+   /* The backend also sometimes adds params for texture size. */
+   param_count += 2 * ctx->Const.Program[MESA_SHADER_FRAGMENT].MaxTextureImageUnits;
+   c->prog_data.base.param = rzalloc_array(NULL, const float *, param_count);
+   c->prog_data.base.pull_param =
+      rzalloc_array(NULL, const float *, param_count);
+   c->prog_data.base.nr_params = param_count;
+
+   c->prog_data.barycentric_interp_modes =
+      brw_compute_barycentric_interp_modes(brw, c->key.flat_shade,
+                                           c->key.persample_shading,
+                                           &c->fp->program);
+
+   c->program = brw_wm_fs_emit(brw, c,
+         &c->fp->program, c->shader_prog, &c->program_size);
+   if (c->program == NULL)
+      return false;
+
+   /* Scratch space is used for register spilling */
+   if (c->last_scratch) {
+      perf_debug("Fragment shader triggered register spilling.  "
+                 "Try reducing the number of live scalar values to "
+                 "improve performance.\n");
+
+      c->prog_data.total_scratch = brw_get_scratch_size(c->last_scratch);
+   }
+
+   if (unlikely(INTEL_DEBUG & DEBUG_WM))
+      fprintf(stderr, "\n");
+
+   return true;
+}
+
+void
+brw_wm_upload_compile(struct brw_context *brw,
+                      const struct brw_wm_compile *c)
+{
+   if (c->prog_data.total_scratch) {
+      brw_get_scratch_bo(brw, &brw->wm.base.scratch_bo,
+			 c->prog_data.total_scratch * brw->max_wm_threads);
+   }
+
+   brw_upload_cache(&brw->cache, BRW_WM_PROG,
+		    &c->key, sizeof(c->key),
+		    c->program, c->program_size,
+		    &c->prog_data, sizeof(c->prog_data),
+		    &brw->wm.base.prog_offset, &brw->wm.prog_data);
+}
+
+void
+brw_wm_clear_compile(struct brw_context *brw,
+                     struct brw_wm_compile *c)
+{
+   ralloc_free(c);
+}
+
 /**
  * All Mesa program -> GPU code generation goes through this function.
  * Depending on the instructions used (i.e. flow control instructions)
@@ -145,67 +239,19 @@ bool do_wm_prog(struct brw_context *brw,
 		struct brw_fragment_program *fp,
 		struct brw_wm_prog_key *key)
 {
-   struct gl_context *ctx = &brw->ctx;
    struct brw_wm_compile *c;
-   const GLuint *program;
-   struct gl_shader *fs = NULL;
-   GLuint program_size;
 
-   if (prog)
-      fs = prog->_LinkedShaders[MESA_SHADER_FRAGMENT];
-
-   c = rzalloc(NULL, struct brw_wm_compile);
-
-   /* Allocate the references to the uniforms that will end up in the
-    * prog_data associated with the compiled program, and which will be freed
-    * by the state cache.
-    */
-   int param_count;
-   if (fs) {
-      param_count = fs->num_uniform_components;
-   } else {
-      param_count = fp->program.Base.Parameters->NumParameters * 4;
-   }
-   /* The backend also sometimes adds params for texture size. */
-   param_count += 2 * ctx->Const.Program[MESA_SHADER_FRAGMENT].MaxTextureImageUnits;
-   c->prog_data.base.param = rzalloc_array(NULL, const float *, param_count);
-   c->prog_data.base.pull_param =
-      rzalloc_array(NULL, const float *, param_count);
-   c->prog_data.base.nr_params = param_count;
-
-   memcpy(&c->key, key, sizeof(*key));
-
-   c->prog_data.barycentric_interp_modes =
-      brw_compute_barycentric_interp_modes(brw, c->key.flat_shade,
-                                           c->key.persample_shading,
-                                           &fp->program);
-
-   program = brw_wm_fs_emit(brw, c, &fp->program, prog, &program_size);
-   if (program == NULL)
+   c = brw_wm_init_compile(brw, prog, fp, key);
+   if (!c)
       return false;
 
-   /* Scratch space is used for register spilling */
-   if (c->last_scratch) {
-      perf_debug("Fragment shader triggered register spilling.  "
-                 "Try reducing the number of live scalar values to "
-                 "improve performance.\n");
-
-      c->prog_data.total_scratch = brw_get_scratch_size(c->last_scratch);
-
-      brw_get_scratch_bo(brw, &brw->wm.base.scratch_bo,
-			 c->prog_data.total_scratch * brw->max_wm_threads);
+   if (!brw_wm_do_compile(brw, c)) {
+      brw_wm_clear_compile(brw, c);
+      return false;
    }
 
-   if (unlikely(INTEL_DEBUG & DEBUG_WM))
-      fprintf(stderr, "\n");
-
-   brw_upload_cache(&brw->cache, BRW_WM_PROG,
-		    &c->key, sizeof(c->key),
-		    program, program_size,
-		    &c->prog_data, sizeof(c->prog_data),
-		    &brw->wm.base.prog_offset, &brw->wm.prog_data);
-
-   ralloc_free(c);
+   brw_wm_upload_compile(brw, c);
+   brw_wm_clear_compile(brw, c);
 
    return true;
 }

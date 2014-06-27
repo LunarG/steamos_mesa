@@ -97,7 +97,31 @@ struct brw_wm_compile {
    GLuint runtime_check_aads_emit:1;
 
    GLuint last_scratch;
+
+   struct gl_shader_program *shader_prog;
+   struct brw_fragment_program *fp;
+
+   const unsigned *program;
+   unsigned program_size;
 };
+
+struct brw_wm_compile *
+brw_wm_init_compile(struct brw_context *brw,
+		    struct gl_shader_program *prog,
+		    struct brw_fragment_program *fp,
+		    const struct brw_wm_prog_key *key);
+
+bool
+brw_wm_do_compile(struct brw_context *brw,
+                  struct brw_wm_compile *c);
+
+void
+brw_wm_upload_compile(struct brw_context *brw,
+                      const struct brw_wm_compile *c);
+
+void
+brw_wm_clear_compile(struct brw_context *brw,
+                     struct brw_wm_compile *c);
 
 /**
  * Compile a fragment shader.

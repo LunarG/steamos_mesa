@@ -33,22 +33,29 @@
 #include "brw_state.h"
 
 
-static bool
-do_gs_prog(struct brw_context *brw,
-           struct gl_shader_program *prog,
-           struct brw_geometry_program *gp,
-           struct brw_gs_prog_key *key)
+static void
+brw_gs_init_compile(struct brw_context *brw,
+                    struct gl_shader_program *prog,
+                    struct brw_geometry_program *gp,
+                    const struct brw_gs_prog_key *key,
+                    struct brw_gs_compile *c)
 {
-   struct brw_stage_state *stage_state = &brw->gs.base;
-   struct brw_gs_compile c;
-   memset(&c, 0, sizeof(c));
-   c.key = *key;
-   c.gp = gp;
+   memset(c, 0, sizeof(*c));
 
-   c.prog_data.include_primitive_id =
-      (gp->program.Base.InputsRead & VARYING_BIT_PRIMITIVE_ID) != 0;
+   c->key = *key;
+   c->gp = gp;
+   c->base.shader_prog = prog;
+   c->base.mem_ctx = ralloc_context(NULL);
+}
 
-   c.prog_data.invocations = gp->program.Invocations;
+static bool
+brw_gs_do_compile(struct brw_context *brw,
+                  struct brw_gs_compile *c)
+{
+   c->prog_data.include_primitive_id =
+      (c->gp->program.Base.InputsRead & VARYING_BIT_PRIMITIVE_ID) != 0;
+
+   c->prog_data.invocations = c->gp->program.Invocations;
 
    /* Allocate the references to the uniforms that will end up in the
     * prog_data associated with the compiled program, and which will be freed
@@ -58,33 +65,34 @@ do_gs_prog(struct brw_context *brw,
     * padding around uniform values below vec4 size, so the worst case is that
     * every uniform is a float which gets padded to the size of a vec4.
     */
-   struct gl_shader *gs = prog->_LinkedShaders[MESA_SHADER_GEOMETRY];
+   struct gl_shader *gs =
+      c->base.shader_prog->_LinkedShaders[MESA_SHADER_GEOMETRY];
    int param_count = gs->num_uniform_components * 4;
 
    /* We also upload clip plane data as uniforms */
    param_count += MAX_CLIP_PLANES * 4;
 
-   c.prog_data.base.base.param =
+   c->prog_data.base.base.param =
       rzalloc_array(NULL, const float *, param_count);
-   c.prog_data.base.base.pull_param =
+   c->prog_data.base.base.pull_param =
       rzalloc_array(NULL, const float *, param_count);
    /* Setting nr_params here NOT to the size of the param and pull_param
     * arrays, but to the number of uniform components vec4_visitor
     * needs. vec4_visitor::setup_uniforms() will set it back to a proper value.
     */
-   c.prog_data.base.base.nr_params = ALIGN(param_count, 4) / 4 + gs->num_samplers;
+   c->prog_data.base.base.nr_params = ALIGN(param_count, 4) / 4 + gs->num_samplers;
 
-   if (gp->program.OutputType == GL_POINTS) {
+   if (c->gp->program.OutputType == GL_POINTS) {
       /* When the output type is points, the geometry shader may output data
        * to multiple streams, and EndPrimitive() has no effect.  So we
        * configure the hardware to interpret the control data as stream ID.
        */
-      c.prog_data.control_data_format = GEN7_GS_CONTROL_DATA_FORMAT_GSCTL_SID;
+      c->prog_data.control_data_format = GEN7_GS_CONTROL_DATA_FORMAT_GSCTL_SID;
 
       /* However, StreamID is not yet supported, so we output zero bits of
        * control data per vertex.
        */
-      c.control_data_bits_per_vertex = 0;
+      c->control_data_bits_per_vertex = 0;
    } else {
       /* When the output type is triangle_strip or line_strip, EndPrimitive()
        * may be used to terminate the current strip and start a new one
@@ -92,32 +100,33 @@ do_gs_prog(struct brw_context *brw,
        * streams is not supported.  So we configure the hardware to interpret
        * the control data as EndPrimitive information (a.k.a. "cut bits").
        */
-      c.prog_data.control_data_format = GEN7_GS_CONTROL_DATA_FORMAT_GSCTL_CUT;
+      c->prog_data.control_data_format = GEN7_GS_CONTROL_DATA_FORMAT_GSCTL_CUT;
 
       /* We only need to output control data if the shader actually calls
        * EndPrimitive().
        */
-      c.control_data_bits_per_vertex = gp->program.UsesEndPrimitive ? 1 : 0;
+      c->control_data_bits_per_vertex =
+         c->gp->program.UsesEndPrimitive ? 1 : 0;
    }
-   c.control_data_header_size_bits =
-      gp->program.VerticesOut * c.control_data_bits_per_vertex;
+   c->control_data_header_size_bits =
+      c->gp->program.VerticesOut * c->control_data_bits_per_vertex;
 
    /* 1 HWORD = 32 bytes = 256 bits */
-   c.prog_data.control_data_header_size_hwords =
-      ALIGN(c.control_data_header_size_bits, 256) / 256;
+   c->prog_data.control_data_header_size_hwords =
+      ALIGN(c->control_data_header_size_bits, 256) / 256;
 
-   GLbitfield64 outputs_written = gp->program.Base.OutputsWritten;
+   GLbitfield64 outputs_written = c->gp->program.Base.OutputsWritten;
 
    /* In order for legacy clipping to work, we need to populate the clip
     * distance varying slots whenever clipping is enabled, even if the vertex
     * shader doesn't write to gl_ClipDistance.
     */
-   if (c.key.base.userclip_active) {
+   if (c->key.base.userclip_active) {
       outputs_written |= BITFIELD64_BIT(VARYING_SLOT_CLIP_DIST0);
       outputs_written |= BITFIELD64_BIT(VARYING_SLOT_CLIP_DIST1);
    }
 
-   brw_compute_vue_map(brw, &c.prog_data.base.vue_map, outputs_written);
+   brw_compute_vue_map(brw, &c->prog_data.base.vue_map, outputs_written);
 
    /* Compute the output vertex size.
     *
@@ -167,9 +176,9 @@ do_gs_prog(struct brw_context *brw,
     * per interpolation type, so this is plenty.
     *
     */
-   unsigned output_vertex_size_bytes = c.prog_data.base.vue_map.num_slots * 16;
+   unsigned output_vertex_size_bytes = c->prog_data.base.vue_map.num_slots * 16;
    assert(output_vertex_size_bytes <= GEN7_MAX_GS_OUTPUT_VERTEX_SIZE_BYTES);
-   c.prog_data.output_vertex_size_hwords =
+   c->prog_data.output_vertex_size_hwords =
       ALIGN(output_vertex_size_bytes, 32) / 32;
 
    /* Compute URB entry size.  The maximum allowed URB entry size is 32k.
@@ -200,8 +209,8 @@ do_gs_prog(struct brw_context *brw,
     * we need, and if it's too large, fail to compile.
     */
    unsigned output_size_bytes =
-      c.prog_data.output_vertex_size_hwords * 32 * gp->program.VerticesOut;
-   output_size_bytes += 32 * c.prog_data.control_data_header_size_hwords;
+      c->prog_data.output_vertex_size_hwords * 32 * c->gp->program.VerticesOut;
+   output_size_bytes += 32 * c->prog_data.control_data_header_size_hwords;
 
    /* Broadwell stores "Vertex Count" as a full 8 DWord (32 byte) URB output,
     * which comes before the control header.
@@ -214,45 +223,75 @@ do_gs_prog(struct brw_context *brw,
       return false;
 
    /* URB entry sizes are stored as a multiple of 64 bytes. */
-   c.prog_data.base.urb_entry_size = ALIGN(output_size_bytes, 64) / 64;
+   c->prog_data.base.urb_entry_size = ALIGN(output_size_bytes, 64) / 64;
 
-   c.prog_data.output_topology = prim_to_hw_prim[gp->program.OutputType];
+   c->prog_data.output_topology = prim_to_hw_prim[c->gp->program.OutputType];
 
-   brw_compute_vue_map(brw, &c.input_vue_map, c.key.input_varyings);
+   brw_compute_vue_map(brw, &c->input_vue_map, c->key.input_varyings);
 
    /* GS inputs are read from the VUE 256 bits (2 vec4's) at a time, so we
     * need to program a URB read length of ceiling(num_slots / 2).
     */
-   c.prog_data.base.urb_read_length = (c.input_vue_map.num_slots + 1) / 2;
+   c->prog_data.base.urb_read_length = (c->input_vue_map.num_slots + 1) / 2;
 
-   void *mem_ctx = ralloc_context(NULL);
-   unsigned program_size;
-   const unsigned *program =
-      brw_gs_emit(brw, prog, &c, mem_ctx, &program_size);
-   if (program == NULL) {
-      ralloc_free(mem_ctx);
+   c->base.program = brw_gs_emit(brw, c->base.shader_prog, c,
+         c->base.mem_ctx, &c->base.program_size);
+   if (c->base.program == NULL)
       return false;
+
+   if (c->base.last_scratch) {
+      c->prog_data.base.total_scratch
+         = brw_get_scratch_size(c->base.last_scratch*REG_SIZE);
    }
 
+   return true;
+}
+
+static void
+brw_gs_upload_compile(struct brw_context *brw,
+                      const struct brw_gs_compile *c)
+{
    /* Scratch space is used for register spilling */
-   if (c.base.last_scratch) {
+   if (c->prog_data.base.total_scratch) {
       perf_debug("Geometry shader triggered register spilling.  "
                  "Try reducing the number of live vec4 values to "
                  "improve performance.\n");
 
-      c.prog_data.base.total_scratch
-         = brw_get_scratch_size(c.base.last_scratch*REG_SIZE);
-
-      brw_get_scratch_bo(brw, &stage_state->scratch_bo,
-			 c.prog_data.base.total_scratch * brw->max_gs_threads);
+      brw_get_scratch_bo(brw, &brw->gs.base.scratch_bo,
+            c->prog_data.base.total_scratch * brw->max_gs_threads);
    }
 
    brw_upload_cache(&brw->cache, BRW_GS_PROG,
-                    &c.key, sizeof(c.key),
-                    program, program_size,
-                    &c.prog_data, sizeof(c.prog_data),
-                    &stage_state->prog_offset, &brw->gs.prog_data);
-   ralloc_free(mem_ctx);
+                    &c->key, sizeof(c->key),
+                    c->base.program, c->base.program_size,
+                    &c->prog_data, sizeof(c->prog_data),
+                    &brw->gs.base.prog_offset, &brw->gs.prog_data);
+}
+
+static void
+brw_gs_clear_compile(struct brw_context *brw,
+                     struct brw_gs_compile *c)
+{
+   ralloc_free(c->base.mem_ctx);
+}
+
+static bool
+do_gs_prog(struct brw_context *brw,
+           struct gl_shader_program *prog,
+           struct brw_geometry_program *gp,
+           struct brw_gs_prog_key *key)
+{
+   struct brw_gs_compile c;
+
+   brw_gs_init_compile(brw, prog, gp, key, &c);
+
+   if (!brw_gs_do_compile(brw, &c)) {
+      brw_gs_clear_compile(brw, &c);
+      return false;
+   }
+
+   brw_gs_upload_compile(brw, &c);
+   brw_gs_clear_compile(brw, &c);
 
    return true;
 }

@@ -75,6 +75,7 @@ struct brw_vs_prog_key {
 struct brw_vs_compile {
    struct brw_vec4_compile base;
    struct brw_vs_prog_key key;
+   struct brw_vs_prog_data prog_data;
 
    struct brw_vertex_program *vp;
 };

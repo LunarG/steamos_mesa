@@ -187,31 +187,31 @@ brw_vs_prog_data_compare(const void *in_a, const void *in_b)
    return true;
 }
 
-static bool
-do_vs_prog(struct brw_context *brw,
-	   struct gl_shader_program *prog,
-	   struct brw_vertex_program *vp,
-	   struct brw_vs_prog_key *key)
+static void
+brw_vs_init_compile(struct brw_context *brw,
+	            struct gl_shader_program *prog,
+	            struct brw_vertex_program *vp,
+	            const struct brw_vs_prog_key *key,
+	            struct brw_vs_compile *c)
 {
-   GLuint program_size;
-   const GLuint *program;
-   struct brw_vs_compile c;
-   struct brw_vs_prog_data prog_data;
-   struct brw_stage_prog_data *stage_prog_data = &prog_data.base.base;
-   void *mem_ctx;
-   int i;
+   memset(c, 0, sizeof(*c));
+
+   memcpy(&c->key, key, sizeof(*key));
+   c->vp = vp;
+   c->base.shader_prog = prog;
+   c->base.mem_ctx = ralloc_context(NULL);
+}
+
+static bool
+brw_vs_do_compile(struct brw_context *brw,
+	          struct brw_vs_compile *c)
+{
+   struct brw_stage_prog_data *stage_prog_data = &c->prog_data.base.base;
    struct gl_shader *vs = NULL;
+   int i;
 
-   if (prog)
-      vs = prog->_LinkedShaders[MESA_SHADER_VERTEX];
-
-   memset(&c, 0, sizeof(c));
-   memcpy(&c.key, key, sizeof(*key));
-   memset(&prog_data, 0, sizeof(prog_data));
-
-   mem_ctx = ralloc_context(NULL);
-
-   c.vp = vp;
+   if (c->base.shader_prog)
+      vs = c->base.shader_prog->_LinkedShaders[MESA_SHADER_VERTEX];
 
    /* Allocate the references to the uniforms that will end up in the
     * prog_data associated with the compiled program, and which will be freed
@@ -226,12 +226,12 @@ do_vs_prog(struct brw_context *brw,
       param_count = vs->num_uniform_components * 4;
 
    } else {
-      param_count = vp->program.Base.Parameters->NumParameters * 4;
+      param_count = c->vp->program.Base.Parameters->NumParameters * 4;
    }
    /* vec4_visitor::setup_uniform_clipplane_values() also uploads user clip
     * planes as uniforms.
     */
-   param_count += c.key.base.nr_userclip_plane_consts * 4;
+   param_count += c->key.base.nr_userclip_plane_consts * 4;
 
    stage_prog_data->param = rzalloc_array(NULL, const float *, param_count);
    stage_prog_data->pull_param = rzalloc_array(NULL, const float *, param_count);
@@ -245,12 +245,12 @@ do_vs_prog(struct brw_context *brw,
       stage_prog_data->nr_params += vs->num_samplers;
    }
 
-   GLbitfield64 outputs_written = vp->program.Base.OutputsWritten;
-   prog_data.inputs_read = vp->program.Base.InputsRead;
+   GLbitfield64 outputs_written = c->vp->program.Base.OutputsWritten;
+   c->prog_data.inputs_read = c->vp->program.Base.InputsRead;
 
-   if (c.key.copy_edgeflag) {
+   if (c->key.copy_edgeflag) {
       outputs_written |= BITFIELD64_BIT(VARYING_SLOT_EDGE);
-      prog_data.inputs_read |= VERT_BIT_EDGEFLAG;
+      c->prog_data.inputs_read |= VERT_BIT_EDGEFLAG;
    }
 
    if (brw->gen < 6) {
@@ -261,7 +261,7 @@ do_vs_prog(struct brw_context *brw,
        * coords, which would be a pain to handle.
        */
       for (i = 0; i < 8; i++) {
-         if (c.key.point_coord_replace & (1 << i))
+         if (c->key.point_coord_replace & (1 << i))
             outputs_written |= BITFIELD64_BIT(VARYING_SLOT_TEX0 + i);
       }
 
@@ -276,45 +276,76 @@ do_vs_prog(struct brw_context *brw,
     * distance varying slots whenever clipping is enabled, even if the vertex
     * shader doesn't write to gl_ClipDistance.
     */
-   if (c.key.base.userclip_active) {
+   if (c->key.base.userclip_active) {
       outputs_written |= BITFIELD64_BIT(VARYING_SLOT_CLIP_DIST0);
       outputs_written |= BITFIELD64_BIT(VARYING_SLOT_CLIP_DIST1);
    }
 
-   brw_compute_vue_map(brw, &prog_data.base.vue_map, outputs_written);
+   brw_compute_vue_map(brw, &c->prog_data.base.vue_map, outputs_written);
 
    if (0) {
-      _mesa_fprint_program_opt(stderr, &c.vp->program.Base, PROG_PRINT_DEBUG,
+      _mesa_fprint_program_opt(stderr, &c->vp->program.Base, PROG_PRINT_DEBUG,
 			       true);
    }
 
    /* Emit GEN4 code.
     */
-   program = brw_vs_emit(brw, prog, &c, &prog_data, mem_ctx, &program_size);
-   if (program == NULL) {
-      ralloc_free(mem_ctx);
+   c->base.program = brw_vs_emit(brw, c->base.shader_prog, c,
+         &c->prog_data, c->base.mem_ctx, &c->base.program_size);
+   if (c->base.program == NULL)
       return false;
+
+   if (c->base.last_scratch) {
+      c->prog_data.base.total_scratch
+         = brw_get_scratch_size(c->base.last_scratch*REG_SIZE);
    }
 
+   return true;
+}
+
+static void
+brw_vs_upload_compile(struct brw_context *brw, const struct brw_vs_compile *c)
+{
    /* Scratch space is used for register spilling */
-   if (c.base.last_scratch) {
+   if (c->prog_data.base.total_scratch) {
       perf_debug("Vertex shader triggered register spilling.  "
                  "Try reducing the number of live vec4 values to "
                  "improve performance.\n");
 
-      prog_data.base.total_scratch
-         = brw_get_scratch_size(c.base.last_scratch*REG_SIZE);
-
       brw_get_scratch_bo(brw, &brw->vs.base.scratch_bo,
-			 prog_data.base.total_scratch * brw->max_vs_threads);
+            c->prog_data.base.total_scratch * brw->max_vs_threads);
    }
 
    brw_upload_cache(&brw->cache, BRW_VS_PROG,
-		    &c.key, sizeof(c.key),
-		    program, program_size,
-		    &prog_data, sizeof(prog_data),
+		    &c->key, sizeof(c->key),
+		    c->base.program, c->base.program_size,
+		    &c->prog_data, sizeof(c->prog_data),
 		    &brw->vs.base.prog_offset, &brw->vs.prog_data);
-   ralloc_free(mem_ctx);
+}
+
+static void
+brw_vs_clear_compile(struct brw_context *brw,
+	             struct brw_vs_compile *c)
+{
+   ralloc_free(c->base.mem_ctx);
+}
+
+static bool
+do_vs_prog(struct brw_context *brw,
+	   struct gl_shader_program *prog,
+	   struct brw_vertex_program *vp,
+	   struct brw_vs_prog_key *key)
+{
+   struct brw_vs_compile c;
+
+   brw_vs_init_compile(brw, prog, vp, key, &c);
+   if (!brw_vs_do_compile(brw, &c)) {
+      brw_vs_clear_compile(brw, &c);
+      return false;
+   }
+
+   brw_vs_upload_compile(brw, &c);
+   brw_vs_clear_compile(brw, &c);
 
    return true;
 }

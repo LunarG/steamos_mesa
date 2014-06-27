@@ -47,6 +47,12 @@ extern "C" {
 
 struct brw_vec4_compile {
    GLuint last_scratch; /**< measured in 32-byte (register size) units */
+
+   struct gl_shader_program *shader_prog;
+
+   void *mem_ctx;
+   const unsigned *program;
+   unsigned program_size;
 };
 
 

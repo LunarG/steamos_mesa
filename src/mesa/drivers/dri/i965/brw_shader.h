@@ -113,3 +113,47 @@ int brw_type_for_base_type(const struct glsl_type *type);
 uint32_t brw_conditional_for_comparison(unsigned int op);
 uint32_t brw_math_function(enum opcode op);
 const char *brw_instruction_name(enum opcode op);
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+struct brw_shader_program_precompile_key {
+   unsigned fbo_height;
+   bool is_user_fbo;
+};
+
+struct brw_vs_compile;
+struct brw_gs_compile;
+struct brw_wm_compile;
+
+const struct brw_shader_program_precompile_key *
+brw_shader_program_get_precompile_key(struct gl_shader_program *shader_prog);
+
+void
+brw_shader_program_save_vs_compile(struct gl_shader_program *shader_prog,
+                                   const struct brw_vs_compile *c);
+
+void
+brw_shader_program_save_gs_compile(struct gl_shader_program *shader_prog,
+                                   const struct brw_gs_compile *c);
+
+void
+brw_shader_program_save_wm_compile(struct gl_shader_program *shader_prog,
+                                   const struct brw_wm_compile *c);
+
+bool
+brw_shader_program_restore_vs_compile(struct gl_shader_program *shader_prog,
+                                      struct brw_vs_compile *c);
+
+bool
+brw_shader_program_restore_gs_compile(struct gl_shader_program *shader_prog,
+                                      struct brw_gs_compile *c);
+
+bool
+brw_shader_program_restore_wm_compile(struct gl_shader_program *shader_prog,
+                                      struct brw_wm_compile *c);
+
+#ifdef __cplusplus
+}
+#endif

@@ -285,9 +285,11 @@ do_gs_prog(struct brw_context *brw,
 
    brw_gs_init_compile(brw, prog, gp, key, &c);
 
-   if (!brw_gs_do_compile(brw, &c)) {
-      brw_gs_clear_compile(brw, &c);
-      return false;
+   if (!brw_shader_program_restore_gs_compile(prog, &c)) {
+      if (!brw_gs_do_compile(brw, &c)) {
+         brw_gs_clear_compile(brw, &c);
+         return false;
+      }
    }
 
    brw_gs_upload_compile(brw, &c);
@@ -373,9 +375,6 @@ brw_gs_precompile(struct gl_context *ctx, struct gl_shader_program *prog)
 {
    struct brw_context *brw = brw_context(ctx);
    struct brw_gs_prog_key key;
-   uint32_t old_prog_offset = brw->gs.base.prog_offset;
-   struct brw_gs_prog_data *old_prog_data = brw->gs.prog_data;
-   bool success;
 
    if (!prog->_LinkedShaders[MESA_SHADER_GEOMETRY])
       return true;
@@ -393,12 +392,30 @@ brw_gs_precompile(struct gl_context *ctx, struct gl_shader_program *prog)
     */
    key.input_varyings = gp->Base.InputsRead;
 
-   success = do_gs_prog(brw, prog, bgp, &key);
+   struct brw_gs_compile c;
 
-   brw->gs.base.prog_offset = old_prog_offset;
-   brw->gs.prog_data = old_prog_data;
+   brw_gs_init_compile(brw, prog, bgp, &key, &c);
+   if (!brw_gs_do_compile(brw, &c)) {
+      brw_gs_clear_compile(brw, &c);
+      return false;
+   }
 
-   return success;
+   if (brw->ctx.Const.DeferLinkProgram) {
+      brw_shader_program_save_gs_compile(prog, &c);
+   }
+   else {
+      uint32_t old_prog_offset = brw->gs.base.prog_offset;
+      struct brw_gs_prog_data *old_prog_data = brw->gs.prog_data;
+
+      brw_gs_upload_compile(brw, &c);
+
+      brw->gs.base.prog_offset = old_prog_offset;
+      brw->gs.prog_data = old_prog_data;
+   }
+
+   brw_gs_clear_compile(brw, &c);
+
+   return true;
 }
 
 

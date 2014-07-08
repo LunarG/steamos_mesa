@@ -783,8 +783,8 @@ brwCreateContext(gl_api api,
    if (INTEL_DEBUG & DEBUG_SHADER_TIME)
       brw_init_shader_time(brw);
 
-   /* brw_shader_precompile is not thread-safe */
-   if (brw->precompile)
+   /* brw_shader_precompile is not thread-safe when debug flags are set */
+   if (brw->precompile && (INTEL_DEBUG || brw->perf_debug))
       ctx->Const.DeferLinkProgram = GL_FALSE;
 
    _mesa_compute_version(ctx);

@@ -25,12 +25,50 @@ extern "C" {
 #include "main/macros.h"
 #include "brw_context.h"
 }
+#include "brw_shader.h"
 #include "brw_vs.h"
 #include "brw_vec4_gs.h"
+#include "brw_vec4_gs_visitor.h"
 #include "brw_fs.h"
 #include "glsl/ir_optimization.h"
 #include "glsl/glsl_parser_extras.h"
+#include "main/fbobject.h"
 #include "main/shaderapi.h"
+
+struct brw_shader_program {
+   struct gl_shader_program base;
+
+   struct brw_shader_program_precompile_key pre_key;
+
+   GLbitfield saved;
+
+   struct {
+      struct brw_vs_prog_key key;
+      struct brw_vs_prog_data data;
+      const unsigned *program;
+      unsigned program_size;
+   } vs;
+
+   struct {
+      struct brw_gs_prog_key key;
+      struct brw_gs_prog_data data;
+      const unsigned *program;
+      unsigned program_size;
+   } gs;
+
+   struct {
+      struct brw_wm_prog_key key;
+      struct brw_wm_prog_data data;
+      const unsigned *program;
+      unsigned program_size;
+   } wm;
+};
+
+static inline struct brw_shader_program *
+brw_shader_program(struct gl_shader_program *prog)
+{
+   return (struct brw_shader_program *) prog;
+}
 
 struct gl_shader *
 brw_new_shader(struct gl_context *ctx, GLuint name, GLuint type)
@@ -51,12 +89,143 @@ brw_new_shader(struct gl_context *ctx, GLuint name, GLuint type)
 struct gl_shader_program *
 brw_new_shader_program(struct gl_context *ctx, GLuint name)
 {
-   struct gl_shader_program *prog = rzalloc(NULL, struct gl_shader_program);
+   struct brw_shader_program *prog = rzalloc(NULL, struct brw_shader_program);
    if (prog) {
-      prog->Name = name;
-      _mesa_init_shader_program(ctx, prog);
+      prog->base.Name = name;
+      _mesa_init_shader_program(ctx, &prog->base);
    }
-   return prog;
+   return &prog->base;
+}
+
+void
+brw_notify_link_shader(struct gl_context *ctx,
+                       struct gl_shader_program *shProg)
+{
+   struct brw_context *brw = brw_context(ctx);
+   struct brw_shader_program *prog = brw_shader_program(shProg);
+
+   if (brw->precompile) {
+      prog->pre_key.fbo_height = ctx->DrawBuffer->Height;
+      prog->pre_key.is_user_fbo = _mesa_is_user_fbo(ctx->DrawBuffer);
+   }
+}
+
+const struct brw_shader_program_precompile_key *
+brw_shader_program_get_precompile_key(struct gl_shader_program *shader_prog)
+{
+   struct brw_shader_program *prog = brw_shader_program(shader_prog);
+   return &prog->pre_key;
+}
+
+void
+brw_shader_program_save_vs_compile(struct gl_shader_program *shader_prog,
+                                   const struct brw_vs_compile *c)
+{
+   struct brw_shader_program *prog = brw_shader_program(shader_prog);
+
+   memcpy(&prog->vs.key, &c->key, sizeof(prog->vs.key));
+   memcpy(&prog->vs.data, &c->prog_data, sizeof(prog->vs.data));
+   prog->vs.program = c->base.program;
+   prog->vs.program_size = c->base.program_size;
+   ralloc_steal(shader_prog, (void *) c->base.program);
+
+   prog->saved |= 1 << BRW_VS_PROG;
+}
+
+void
+brw_shader_program_save_gs_compile(struct gl_shader_program *shader_prog,
+                                   const struct brw_gs_compile *c)
+{
+   struct brw_shader_program *prog = brw_shader_program(shader_prog);
+
+   memcpy(&prog->gs.key, &c->key, sizeof(prog->gs.key));
+   memcpy(&prog->gs.data, &c->prog_data, sizeof(prog->gs.data));
+   prog->gs.program = c->base.program;
+   prog->gs.program_size = c->base.program_size;
+   ralloc_steal(shader_prog, (void *) c->base.program);
+
+   prog->saved |= 1 << BRW_GS_PROG;
+}
+
+void
+brw_shader_program_save_wm_compile(struct gl_shader_program *shader_prog,
+                                   const struct brw_wm_compile *c)
+{
+   struct brw_shader_program *prog = brw_shader_program(shader_prog);
+
+   memcpy(&prog->wm.key, &c->key, sizeof(prog->wm.key));
+   memcpy(&prog->wm.data, &c->prog_data, sizeof(prog->wm.data));
+   prog->wm.program = c->program;
+   prog->wm.program_size = c->program_size;
+   ralloc_steal(shader_prog, (void *) c->program);
+
+   prog->saved |= 1 << BRW_WM_PROG;
+}
+
+bool
+brw_shader_program_restore_vs_compile(struct gl_shader_program *shader_prog,
+                                      struct brw_vs_compile *c)
+{
+   struct brw_shader_program *prog = brw_shader_program(shader_prog);
+
+   if (!(prog->saved & (1 << BRW_VS_PROG)))
+      return false;
+
+   prog->saved &= ~(1 << BRW_VS_PROG);
+
+   if (memcmp(&c->key, &prog->vs.key, sizeof(prog->vs.key)))
+      return false;
+
+   memcpy(&c->prog_data, &prog->vs.data, sizeof(prog->vs.data));
+   c->base.program = prog->vs.program;
+   c->base.program_size = prog->vs.program_size;
+   ralloc_steal(c->base.mem_ctx, (void *) c->base.program);
+
+   return true;
+}
+
+bool
+brw_shader_program_restore_gs_compile(struct gl_shader_program *shader_prog,
+                                      struct brw_gs_compile *c)
+{
+   struct brw_shader_program *prog = brw_shader_program(shader_prog);
+
+   if (!(prog->saved & (1 << BRW_GS_PROG)))
+      return false;
+
+   prog->saved &= ~(1 << BRW_GS_PROG);
+
+   if (memcmp(&c->key, &prog->gs.key, sizeof(prog->gs.key)))
+      return false;
+
+   memcpy(&c->prog_data, &prog->gs.data, sizeof(prog->gs.data));
+   c->base.program = prog->gs.program;
+   c->base.program_size = prog->gs.program_size;
+   ralloc_steal(c->base.mem_ctx, (void *) c->base.program);
+
+   return true;
+}
+
+bool
+brw_shader_program_restore_wm_compile(struct gl_shader_program *shader_prog,
+                                      struct brw_wm_compile *c)
+{
+   struct brw_shader_program *prog = brw_shader_program(shader_prog);
+
+   if (!(prog->saved & (1 << BRW_WM_PROG)))
+      return false;
+
+   prog->saved &= ~(1 << BRW_WM_PROG);
+
+   if (memcmp(&c->key, &prog->wm.key, sizeof(prog->wm.key)))
+      return false;
+
+   memcpy(&c->prog_data, &prog->wm.data, sizeof(prog->wm.data));
+   c->program = prog->wm.program;
+   c->program_size = prog->wm.program_size;
+   ralloc_steal(c, (void *) c->program);
+
+   return true;
 }
 
 /**

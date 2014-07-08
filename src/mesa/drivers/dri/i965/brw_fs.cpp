@@ -3244,6 +3244,8 @@ bool
 brw_fs_precompile(struct gl_context *ctx, struct gl_shader_program *prog)
 {
    struct brw_context *brw = brw_context(ctx);
+   const struct brw_shader_program_precompile_key *pre_key =
+      brw_shader_program_get_precompile_key(prog);
    struct brw_wm_prog_key key;
 
    if (!prog->_LinkedShaders[MESA_SHADER_FRAGMENT])
@@ -3287,7 +3289,7 @@ brw_fs_precompile(struct gl_context *ctx, struct gl_shader_program *prog)
    }
 
    if (fp->Base.InputsRead & VARYING_BIT_POS) {
-      key.drawable_height = ctx->DrawBuffer->Height;
+      key.drawable_height = pre_key->fbo_height;
    }
 
    key.nr_color_regions = _mesa_bitcount_64(fp->Base.OutputsWritten &
@@ -3295,7 +3297,7 @@ brw_fs_precompile(struct gl_context *ctx, struct gl_shader_program *prog)
          BITFIELD64_BIT(FRAG_RESULT_SAMPLE_MASK)));
 
    if ((fp->Base.InputsRead & VARYING_BIT_POS) || program_uses_dfdy) {
-      key.render_to_fbo = _mesa_is_user_fbo(ctx->DrawBuffer) ||
+      key.render_to_fbo = pre_key->is_user_fbo ||
                           key.nr_color_regions > 1;
    }
 
@@ -3307,13 +3309,31 @@ brw_fs_precompile(struct gl_context *ctx, struct gl_shader_program *prog)
 
    key.program_string_id = bfp->id;
 
-   uint32_t old_prog_offset = brw->wm.base.prog_offset;
-   struct brw_wm_prog_data *old_prog_data = brw->wm.prog_data;
+   struct brw_wm_compile *c;
 
-   bool success = do_wm_prog(brw, prog, bfp, &key);
+   c = brw_wm_init_compile(brw, prog, bfp, &key);
+   if (!c)
+      return false;
 
-   brw->wm.base.prog_offset = old_prog_offset;
-   brw->wm.prog_data = old_prog_data;
+   if (!brw_wm_do_compile(brw, c)) {
+      brw_wm_clear_compile(brw, c);
+      return false;
+   }
 
-   return success;
+   if (brw->ctx.Const.DeferLinkProgram) {
+      brw_shader_program_save_wm_compile(prog, c);
+   }
+   else {
+      uint32_t old_prog_offset = brw->wm.base.prog_offset;
+      struct brw_wm_prog_data *old_prog_data = brw->wm.prog_data;
+
+      brw_wm_upload_compile(brw, c);
+
+      brw->wm.base.prog_offset = old_prog_offset;
+      brw->wm.prog_data = old_prog_data;
+   }
+
+   brw_wm_clear_compile(brw, c);
+
+   return true;
 }

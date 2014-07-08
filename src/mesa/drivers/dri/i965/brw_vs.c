@@ -339,9 +339,12 @@ do_vs_prog(struct brw_context *brw,
    struct brw_vs_compile c;
 
    brw_vs_init_compile(brw, prog, vp, key, &c);
-   if (!brw_vs_do_compile(brw, &c)) {
-      brw_vs_clear_compile(brw, &c);
-      return false;
+
+   if (!prog || !brw_shader_program_restore_vs_compile(prog, &c)) {
+      if (!brw_vs_do_compile(brw, &c)) {
+         brw_vs_clear_compile(brw, &c);
+         return false;
+      }
    }
 
    brw_vs_upload_compile(brw, &c);
@@ -555,9 +558,6 @@ brw_vs_precompile(struct gl_context *ctx, struct gl_shader_program *prog)
 {
    struct brw_context *brw = brw_context(ctx);
    struct brw_vs_prog_key key;
-   uint32_t old_prog_offset = brw->vs.base.prog_offset;
-   struct brw_vs_prog_data *old_prog_data = brw->vs.prog_data;
-   bool success;
 
    if (!prog->_LinkedShaders[MESA_SHADER_VERTEX])
       return true;
@@ -570,10 +570,26 @@ brw_vs_precompile(struct gl_context *ctx, struct gl_shader_program *prog)
 
    brw_vec4_setup_prog_key_for_precompile(ctx, &key.base, bvp->id, &vp->Base);
 
-   success = do_vs_prog(brw, prog, bvp, &key);
+   struct brw_vs_compile c;
 
-   brw->vs.base.prog_offset = old_prog_offset;
-   brw->vs.prog_data = old_prog_data;
+   brw_vs_init_compile(brw, prog, bvp, &key, &c);
+   if (!brw_vs_do_compile(brw, &c)) {
+      brw_vs_clear_compile(brw, &c);
+      return false;
+   }
 
-   return success;
+   if (brw->ctx.Const.DeferLinkProgram) {
+      brw_shader_program_save_vs_compile(prog, &c);
+   }
+   else {
+      uint32_t old_prog_offset = brw->vs.base.prog_offset;
+      struct brw_vs_prog_data *old_prog_data = brw->vs.prog_data;
+
+      brw_vs_upload_compile(brw, &c);
+
+      brw->vs.base.prog_offset = old_prog_offset;
+      brw->vs.prog_data = old_prog_data;
+   }
+
+   return true;
 }

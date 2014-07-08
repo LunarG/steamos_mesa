@@ -30,6 +30,7 @@
   */
 
 #include "brw_context.h"
+#include "brw_shader.h"
 #include "brw_wm.h"
 #include "brw_state.h"
 #include "main/enums.h"
@@ -229,15 +230,10 @@ brw_wm_clear_compile(struct brw_context *brw,
    ralloc_free(c);
 }
 
-/**
- * All Mesa program -> GPU code generation goes through this function.
- * Depending on the instructions used (i.e. flow control instructions)
- * we'll use one of two code generators.
- */
-bool do_wm_prog(struct brw_context *brw,
-		struct gl_shader_program *prog,
-		struct brw_fragment_program *fp,
-		struct brw_wm_prog_key *key)
+static bool do_wm_prog(struct brw_context *brw,
+                       struct gl_shader_program *prog,
+                       struct brw_fragment_program *fp,
+                       struct brw_wm_prog_key *key)
 {
    struct brw_wm_compile *c;
 
@@ -245,9 +241,11 @@ bool do_wm_prog(struct brw_context *brw,
    if (!c)
       return false;
 
-   if (!brw_wm_do_compile(brw, c)) {
-      brw_wm_clear_compile(brw, c);
-      return false;
+   if (!prog || !brw_shader_program_restore_wm_compile(prog, c)) {
+      if (!brw_wm_do_compile(brw, c)) {
+         brw_wm_clear_compile(brw, c);
+         return false;
+      }
    }
 
    brw_wm_upload_compile(brw, c);

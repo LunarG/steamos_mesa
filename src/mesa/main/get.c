@@ -28,6 +28,7 @@
 #include "blend.h"
 #include "enable.h"
 #include "enums.h"
+#include "errors.h"
 #include "extensions.h"
 #include "get.h"
 #include "macros.h"
@@ -842,6 +843,16 @@ find_custom_value(struct gl_context *ctx, const struct value_desc *d, union valu
       v->value_int = ctx->Array.ArrayObj->ElementArrayBufferObj->Name;
       break;
 
+   /* ARB_vertex_array_bgra */
+   case GL_COLOR_ARRAY_SIZE:
+      array = &ctx->Array.ArrayObj->VertexAttrib[VERT_ATTRIB_COLOR0];
+      v->value_int = array->Format == GL_BGRA ? GL_BGRA : array->Size;
+      break;
+   case GL_SECONDARY_COLOR_ARRAY_SIZE:
+      array = &ctx->Array.ArrayObj->VertexAttrib[VERT_ATTRIB_COLOR1];
+      v->value_int = array->Format == GL_BGRA ? GL_BGRA : array->Size;
+      break;
+
    /* ARB_copy_buffer */
    case GL_COPY_READ_BUFFER:
       v->value_int = ctx->CopyReadBuffer->Name;
@@ -970,9 +981,19 @@ find_custom_value(struct gl_context *ctx, const struct value_desc *d, union valu
          _mesa_problem(ctx, "driver doesn't implement GetTimestamp");
       }
       break;
+   /* GL_KHR_DEBUG */
+   case GL_DEBUG_LOGGED_MESSAGES:
+   case GL_DEBUG_NEXT_LOGGED_MESSAGE_LENGTH:
+   case GL_DEBUG_GROUP_STACK_DEPTH:
+      v->value_int = _mesa_get_debug_state_int(ctx, d->pname);
+      break;
    /* GL_ARB_shader_atomic_counters */
    case GL_ATOMIC_COUNTER_BUFFER_BINDING:
-      v->value_int = ctx->AtomicBuffer->Name;
+      if (ctx->AtomicBuffer) {
+         v->value_int = ctx->AtomicBuffer->Name;
+      } else {
+         v->value_int = 0;
+      }
       break;
    /* GL_ARB_draw_indirect */
    case GL_DRAW_INDIRECT_BUFFER_BINDING:
@@ -1957,7 +1978,7 @@ _mesa_GetBooleani_v( GLenum pname, GLuint index, GLboolean *params )
       params[3] = INT_TO_BOOLEAN(v.value_int_4[3]);
       break;
    case TYPE_INT64:
-      params[0] = INT64_TO_BOOLEAN(v.value_int);
+      params[0] = INT64_TO_BOOLEAN(v.value_int64);
       break;
    default:
       ; /* nothing - GL error was recorded */
@@ -2002,7 +2023,7 @@ _mesa_GetIntegeri_v( GLenum pname, GLuint index, GLint *params )
       params[3] = v.value_int_4[3];
       break;
    case TYPE_INT64:
-      params[0] = INT64_TO_INT(v.value_int);
+      params[0] = INT64_TO_INT(v.value_int64);
       break;
    default:
       ; /* nothing - GL error was recorded */
@@ -2027,7 +2048,7 @@ _mesa_GetInteger64i_v( GLenum pname, GLuint index, GLint64 *params )
       params[3] = v.value_int_4[3];
       break;
    case TYPE_INT64:
-      params[0] = v.value_int;
+      params[0] = v.value_int64;
       break;
    default:
       ; /* nothing - GL error was recorded */

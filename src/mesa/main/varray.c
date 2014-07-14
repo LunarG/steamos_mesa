@@ -569,8 +569,8 @@ void GLAPIENTRY
 _mesa_EdgeFlagPointer(GLsizei stride, const GLvoid *ptr)
 {
    const GLbitfield legalTypes = UNSIGNED_BYTE_BIT;
-   /* see table 2.4 edits in GL_EXT_gpu_shader4 spec: */
-   const GLboolean integer = GL_TRUE;
+   /* this is the same type that glEdgeFlag uses */
+   const GLboolean integer = GL_FALSE;
    GET_CURRENT_CONTEXT(ctx);
 
    FLUSH_VERTICES(ctx, 0);
@@ -738,7 +738,7 @@ get_vertex_array_attrib(struct gl_context *ctx, GLuint index, GLenum pname,
    case GL_VERTEX_ATTRIB_ARRAY_ENABLED_ARB:
       return array->Enabled;
    case GL_VERTEX_ATTRIB_ARRAY_SIZE_ARB:
-      return array->Size;
+      return (array->Format == GL_BGRA) ? GL_BGRA : array->Size;
    case GL_VERTEX_ATTRIB_ARRAY_STRIDE_ARB:
       return array->Stride;
    case GL_VERTEX_ATTRIB_ARRAY_TYPE_ARB:
@@ -784,13 +784,7 @@ static const GLfloat *
 get_current_attrib(struct gl_context *ctx, GLuint index, const char *function)
 {
    if (index == 0) {
-      /* In OpenGL 3.1 attribute 0 becomes non-magic, just like in OpenGL ES
-       * 2.0.  Note that we cannot just check for API_OPENGL_CORE here because
-       * that will erroneously allow this usage in a 3.0 forward-compatible
-       * context too.
-       */
-      if ((ctx->API != API_OPENGL_CORE || ctx->Version < 31)
-          && ctx->API != API_OPENGLES2) {
+      if (_mesa_attr_zero_aliases_vertex(ctx)) {
 	 _mesa_error(ctx, GL_INVALID_OPERATION, "%s(index==0)", function);
 	 return NULL;
       }
@@ -1223,7 +1217,7 @@ _mesa_MultiDrawArrays( GLenum mode, const GLint *first,
 
    for (i = 0; i < primcount; i++) {
       if (count[i] > 0) {
-         CALL_DrawArrays(ctx->Exec, (mode, first[i], count[i]));
+         CALL_DrawArrays(ctx->CurrentDispatch, (mode, first[i], count[i]));
       }
    }
 }
@@ -1243,7 +1237,7 @@ _mesa_MultiModeDrawArraysIBM( const GLenum * mode, const GLint * first,
    for ( i = 0 ; i < primcount ; i++ ) {
       if ( count[i] > 0 ) {
          GLenum m = *((GLenum *) ((GLubyte *) mode + i * modestride));
-	 CALL_DrawArrays(ctx->Exec, ( m, first[i], count[i] ));
+	 CALL_DrawArrays(ctx->CurrentDispatch, ( m, first[i], count[i] ));
       }
    }
 }
@@ -1265,7 +1259,8 @@ _mesa_MultiModeDrawElementsIBM( const GLenum * mode, const GLsizei * count,
    for ( i = 0 ; i < primcount ; i++ ) {
       if ( count[i] > 0 ) {
          GLenum m = *((GLenum *) ((GLubyte *) mode + i * modestride));
-	 CALL_DrawElements(ctx->Exec, ( m, count[i], type, indices[i] ));
+	 CALL_DrawElements(ctx->CurrentDispatch, ( m, count[i], type,
+                                                   indices[i] ));
       }
    }
 }

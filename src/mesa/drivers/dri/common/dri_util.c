@@ -49,6 +49,7 @@
 #include "../glsl/glsl_parser_extras.h"
 #include "main/mtypes.h"
 #include "main/version.h"
+#include "main/errors.h"
 #include "main/macros.h"
 
 PUBLIC const char __dri2ConfigOptions[] =
@@ -448,8 +449,8 @@ driContextSetFlags(struct gl_context *ctx, uint32_t flags)
     if ((flags & __DRI_CTX_FLAG_FORWARD_COMPATIBLE) != 0)
         ctx->Const.ContextFlags |= GL_CONTEXT_FLAG_FORWARD_COMPATIBLE_BIT;
     if ((flags & __DRI_CTX_FLAG_DEBUG) != 0) {
+       _mesa_set_debug_state_int(ctx, GL_DEBUG_OUTPUT, GL_TRUE);
         ctx->Const.ContextFlags |= GL_CONTEXT_FLAG_DEBUG_BIT;
-        ctx->Debug.DebugOutput = GL_TRUE;
     }
 }
 

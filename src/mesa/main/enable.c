@@ -32,6 +32,7 @@
 #include "clip.h"
 #include "context.h"
 #include "enable.h"
+#include "errors.h"
 #include "light.h"
 #include "simple_list.h"
 #include "mtypes.h"
@@ -367,14 +368,11 @@ _mesa_set_enable(struct gl_context *ctx, GLenum cap, GLboolean state)
          ctx->Depth.Test = state;
          break;
       case GL_DEBUG_OUTPUT:
-         if (!_mesa_is_desktop_gl(ctx))
-            goto invalid_enum_error;
-         ctx->Debug.DebugOutput = state;
-         break;
       case GL_DEBUG_OUTPUT_SYNCHRONOUS_ARB:
          if (!_mesa_is_desktop_gl(ctx))
             goto invalid_enum_error;
-         ctx->Debug.SyncOutput = state;
+         else
+            _mesa_set_debug_state_int(ctx, cap, state);
          break;
       case GL_DITHER:
          if (ctx->Color.DitherFlag == state)
@@ -1226,13 +1224,11 @@ _mesa_IsEnabled( GLenum cap )
       case GL_CULL_FACE:
          return ctx->Polygon.CullFlag;
       case GL_DEBUG_OUTPUT:
-         if (!_mesa_is_desktop_gl(ctx))
-            goto invalid_enum_error;
-         return ctx->Debug.DebugOutput;
       case GL_DEBUG_OUTPUT_SYNCHRONOUS_ARB:
          if (!_mesa_is_desktop_gl(ctx))
             goto invalid_enum_error;
-         return ctx->Debug.SyncOutput;
+         else
+            return (GLboolean) _mesa_get_debug_state_int(ctx, cap);
       case GL_DEPTH_TEST:
          return ctx->Depth.Test;
       case GL_DITHER:

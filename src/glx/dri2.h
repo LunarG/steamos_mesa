@@ -98,6 +98,13 @@ _X_HIDDEN void
 DRI2SwapBuffers(Display *dpy, XID drawable, CARD64 target_msc, CARD64 divisor,
 		CARD64 remainder, CARD64 *count);
 
+_X_HIDDEN int
+dri3_query_renderer_integer(struct glx_screen *base, int attribute,
+                            unsigned int *value);
+
+_X_HIDDEN int
+dri3_query_renderer_string(struct glx_screen *base, int attribute,
+                           const char **value);
 extern Bool
 DRI2GetMSC(Display *dpy, XID drawable, CARD64 *ust, CARD64 *msc, CARD64 *sbc);
 

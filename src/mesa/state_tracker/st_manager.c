@@ -30,6 +30,7 @@
 #include "main/texobj.h"
 #include "main/teximage.h"
 #include "main/texstate.h"
+#include "main/errors.h"
 #include "main/framebuffer.h"
 #include "main/fbobject.h"
 #include "main/renderbuffer.h"
@@ -182,8 +183,13 @@ st_framebuffer_validate(struct st_framebuffer *stfb,
    uint width, height;
    unsigned i;
    boolean changed = FALSE;
-   int32_t new_stamp = p_atomic_read(&stfb->iface->stamp);
+   int32_t new_stamp;
 
+   /* Check for incomplete framebuffers (e.g. EGL_KHR_surfaceless_context) */
+   if (!stfb->iface)
+      return;
+
+   new_stamp = p_atomic_read(&stfb->iface->stamp);
    if (stfb->iface_stamp == new_stamp)
       return;
 
@@ -626,10 +632,12 @@ st_api_create_context(struct st_api *stapi, struct st_manager *smapi,
       return NULL;
    }
 
-   st->ctx->Debug.DebugOutput = GL_FALSE;
    if (attribs->flags & ST_CONTEXT_FLAG_DEBUG){
+      if (!_mesa_set_debug_state_int(st->ctx, GL_DEBUG_OUTPUT, GL_TRUE)) {
+         *error = ST_CONTEXT_ERROR_NO_MEMORY;
+         return NULL;
+      }
       st->ctx->Const.ContextFlags |= GL_CONTEXT_FLAG_DEBUG_BIT;
-      st->ctx->Debug.DebugOutput = GL_TRUE;
    }
 
    if (attribs->flags & ST_CONTEXT_FLAG_FORWARD_COMPATIBLE)

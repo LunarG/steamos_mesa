@@ -166,7 +166,7 @@ _mesa_GetStringi(GLenum name, GLuint index)
       }
       return _mesa_get_enabled_extension(ctx, index);
    default:
-      _mesa_error( ctx, GL_INVALID_ENUM, "glGetString" );
+      _mesa_error(ctx, GL_INVALID_ENUM, "glGetStringi");
       return (const GLubyte *) 0;
    }
 }
@@ -253,14 +253,11 @@ _mesa_GetPointerv( GLenum pname, GLvoid **params )
          *params = (GLvoid *) ctx->Array.ArrayObj->VertexAttrib[VERT_ATTRIB_POINT_SIZE].Ptr;
          break;
       case GL_DEBUG_CALLBACK_FUNCTION_ARB:
-         if (!_mesa_is_desktop_gl(ctx))
-            goto invalid_pname;
-         *params = (GLvoid *) ctx->Debug.Callback;
-         break;
       case GL_DEBUG_CALLBACK_USER_PARAM_ARB:
          if (!_mesa_is_desktop_gl(ctx))
             goto invalid_pname;
-         *params = (GLvoid *) ctx->Debug.CallbackData;
+         else
+            *params = _mesa_get_debug_state_ptr(ctx, pname);
          break;
       default:
          goto invalid_pname;

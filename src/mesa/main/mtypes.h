@@ -71,11 +71,14 @@ typedef GLuint64 GLbitfield64;
  */
 /*@{*/
 struct _mesa_HashTable;
+struct _mesa_threadpool;
+struct _mesa_threadpool_task;
 struct gl_attrib_node;
 struct gl_list_extensions;
 struct gl_meta_state;
 struct gl_program_cache;
 struct gl_texture_object;
+struct gl_debug_state;
 struct gl_context;
 struct st_context;
 struct gl_uniform_storage;
@@ -2395,6 +2398,15 @@ struct gl_shader
    struct glsl_symbol_table *symbols;
 
    bool uses_builtin_functions;
+   bool uses_gl_fragcoord;
+   bool redeclares_gl_fragcoord;
+   bool ARB_fragment_coord_conventions_enable;
+
+   /**
+    * Fragment shader state from GLSL 1.50 layout qualifiers.
+    */
+   bool origin_upper_left;
+   bool pixel_center_integer;
 
    /**
     * Geometry shader state from GLSL 1.50 layout qualifiers.
@@ -2439,6 +2451,14 @@ struct gl_shader
     * ImageAccess arrays above.
     */
    GLuint NumImages;
+
+   /**
+    * Deferred task of glCompileShader.  We should extend the mutex, not only
+    * to protect the deferred task, but to protect the entire gl_shader.
+    */
+   mtx_t Mutex;
+   struct _mesa_threadpool_task *Task;
+   void *TaskData;
 };
 
 
@@ -2689,6 +2709,11 @@ struct gl_shader_program
     * \c NULL.
     */
    struct gl_shader *_LinkedShaders[MESA_SHADER_STAGES];
+
+   /* True if any of the fragment shaders attached to this program use:
+    * #extension ARB_fragment_coord_conventions: enable
+    */
+   GLboolean ARB_fragment_coord_conventions_enable;
 };   
 
 
@@ -3435,6 +3460,7 @@ struct gl_extensions
    GLboolean ARB_texture_mirror_clamp_to_edge;
    GLboolean ARB_texture_multisample;
    GLboolean ARB_texture_non_power_of_two;
+   GLboolean ARB_texture_stencil8;
    GLboolean ARB_texture_query_levels;
    GLboolean ARB_texture_query_lod;
    GLboolean ARB_texture_rg;
@@ -3707,46 +3733,6 @@ enum mesa_debug_severity {
 };
 
 /** @} */
-
-/**
- * An error, warning, or other piece of debug information for an application
- * to consume via GL_ARB_debug_output/GL_KHR_debug.
- */
-struct gl_debug_msg
-{
-   enum mesa_debug_source source;
-   enum mesa_debug_type type;
-   GLuint id;
-   enum mesa_debug_severity severity;
-   GLsizei length;
-   GLcharARB *message;
-};
-
-struct gl_debug_namespace
-{
-   struct _mesa_HashTable *IDs;
-   unsigned ZeroID; /* a HashTable won't take zero, so store its state here */
-   /** lists of IDs in the hash table at each severity */
-   struct simple_node Severity[MESA_DEBUG_SEVERITY_COUNT];
-};
-
-struct gl_debug_state
-{
-   GLDEBUGPROC Callback;
-   const void *CallbackData;
-   GLboolean SyncOutput;
-   GLboolean DebugOutput;
-   GLboolean ARBCallback; /* Used to track if current callback is of type ARB_debug_output or KHR_debug */
-   GLboolean Defaults[MAX_DEBUG_GROUP_STACK_DEPTH][MESA_DEBUG_SEVERITY_COUNT][MESA_DEBUG_SOURCE_COUNT][MESA_DEBUG_TYPE_COUNT];
-   struct gl_debug_namespace Namespaces[MAX_DEBUG_GROUP_STACK_DEPTH][MESA_DEBUG_SOURCE_COUNT][MESA_DEBUG_TYPE_COUNT];
-   struct gl_debug_msg Log[MAX_DEBUG_LOGGED_MESSAGES];
-   struct gl_debug_msg DebugGroupMsgs[MAX_DEBUG_GROUP_STACK_DEPTH];
-   GLint GroupStackDepth;
-   GLint NumMessages;
-   GLint NextMsg;
-   GLint NextMsgLength; /* redundant, but copied here from Log[NextMsg].length
-                           for the sake of the offsetof() code in get.c */
-};
 
 /**
  * Enum for the OpenGL APIs we know about and may support.
@@ -4082,7 +4068,8 @@ struct gl_context
    GLuint ErrorDebugCount;
 
    /* GL_ARB_debug_output/GL_KHR_debug */
-   struct gl_debug_state Debug;
+   mtx_t DebugMutex;
+   struct gl_debug_state *Debug;
 
    GLenum RenderMode;        /**< either GL_RENDER, GL_SELECT, GL_FEEDBACK */
    GLbitfield NewState;      /**< bitwise-or of _NEW_* flags */
@@ -4146,6 +4133,9 @@ struct gl_context
     * Once this field becomes true, it is never reset to false.
     */
    GLboolean ShareGroupReset;
+
+   /* A thread pool for threaded shader compilation */
+   struct _mesa_threadpool *ThreadPool;
 };
 
 

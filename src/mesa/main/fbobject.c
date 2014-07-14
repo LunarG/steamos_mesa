@@ -500,6 +500,12 @@ _mesa_framebuffer_renderbuffer(struct gl_context *ctx,
    }
    else {
       remove_attachment(ctx, att);
+      if (attachment == GL_DEPTH_STENCIL_ATTACHMENT) {
+         /* detach stencil (depth was detached above) */
+         att = get_attachment(ctx, fb, GL_STENCIL_ATTACHMENT_EXT);
+         assert(att);
+         remove_attachment(ctx, att);
+      }
    }
 
    invalidate_framebuffer(fb);
@@ -1055,6 +1061,8 @@ _mesa_test_framebuffer_completeness(struct gl_context *ctx,
       if (att->Layered) {
          if (att_tex_target == GL_TEXTURE_CUBE_MAP)
             att_layer_count = 6;
+         else if (att_tex_target == GL_TEXTURE_1D_ARRAY)
+            att_layer_count = att->Renderbuffer->Height;
          else
             att_layer_count = att->Renderbuffer->Depth;
       } else {
@@ -1565,10 +1573,6 @@ _mesa_base_fbo_format(struct gl_context *ctx, GLenum internalFormat)
       return ctx->API == API_OPENGL_COMPAT &&
              ctx->Extensions.ARB_texture_float &&
              ctx->Extensions.ARB_framebuffer_object ? GL_INTENSITY : 0;
-   case GL_RGB9_E5:
-      return (_mesa_is_desktop_gl(ctx)
-              && ctx->Extensions.EXT_texture_shared_exponent)
-         ? GL_RGB : 0;
    case GL_R11F_G11F_B10F:
       return ((_mesa_is_desktop_gl(ctx) && ctx->Extensions.EXT_packed_float) ||
               _mesa_is_gles3(ctx) /* EXT_color_buffer_float */ )
@@ -2670,8 +2674,7 @@ _mesa_FramebufferRenderbuffer(GLenum target, GLenum attachment,
 	 return;
       }
       else if (rb == &DummyRenderbuffer) {
-         /* This is what NVIDIA does */
-	 _mesa_error(ctx, GL_INVALID_VALUE,
+	 _mesa_error(ctx, GL_INVALID_OPERATION,
 		     "glFramebufferRenderbufferEXT(renderbuffer %u)",
                      renderbuffer);
 	 return;
@@ -2765,6 +2768,19 @@ _mesa_GetFramebufferAttachmentParameteriv(GLenum target, GLenum attachment,
    }
 
    if (attachment == GL_DEPTH_STENCIL_ATTACHMENT) {
+      if (pname == GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE) {
+         /* This behavior is first specified in OpenGL 4.4 specification.
+          *
+          * From the OpenGL 4.4 spec page 275:
+          *   "This query cannot be performed for a combined depth+stencil
+          *    attachment, since it does not have a single format."
+          */
+         _mesa_error(ctx, GL_INVALID_OPERATION,
+                     "glGetFramebufferAttachmentParameteriv("
+                     "GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE"
+                     " is invalid for depth+stencil attachment)");
+         return;
+      }
       /* the depth and stencil attachments must point to the same buffer */
       const struct gl_renderbuffer_attachment *depthAtt, *stencilAtt;
       depthAtt = get_attachment(ctx, buffer, GL_DEPTH_ATTACHMENT);

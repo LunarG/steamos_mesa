@@ -37,6 +37,7 @@ extern "C" {
 #include "glsl_parser.h"
 #include "ir_optimization.h"
 #include "loop_analysis.h"
+#include "threadpool.h"
 
 /**
  * Format a short human-readable description of the given GLSL version.
@@ -49,7 +50,7 @@ glsl_compute_version_string(void *mem_ctx, bool is_es, unsigned version)
 }
 
 
-static unsigned known_desktop_glsl_versions[] =
+static const unsigned known_desktop_glsl_versions[] =
    { 110, 120, 130, 140, 150, 330, 400, 410, 420, 430, 440 };
 
 
@@ -185,6 +186,12 @@ _mesa_glsl_parse_state::_mesa_glsl_parse_state(struct gl_context *_ctx,
    this->default_uniform_qualifier = new(this) ast_type_qualifier();
    this->default_uniform_qualifier->flags.q.shared = 1;
    this->default_uniform_qualifier->flags.q.column_major = 1;
+
+   this->fs_uses_gl_fragcoord = false;
+   this->fs_redeclares_gl_fragcoord = false;
+   this->fs_origin_upper_left = false;
+   this->fs_pixel_center_integer = false;
+   this->fs_redeclares_gl_fragcoord_with_no_layout_qualifiers = false;
 
    this->gs_input_prim_type_specified = false;
    this->gs_input_prim_type = GL_POINTS;
@@ -622,7 +629,7 @@ _mesa_glsl_process_extension(const char *name, YYLTYPE *name_locp,
       if (extension && extension->compatible_with_state(state)) {
          extension->set_flags(state, behavior);
       } else {
-         static const char *const fmt = "extension `%s' unsupported in %s shader";
+         static const char fmt[] = "extension `%s' unsupported in %s shader";
 
          if (behavior == extension_require) {
             _mesa_glsl_error(name_locp, state, fmt,
@@ -1315,9 +1322,15 @@ ast_struct_specifier::ast_struct_specifier(const char *identifier,
 					   ast_declarator_list *declarator_list)
 {
    if (identifier == NULL) {
+      static mtx_t mutex = _MTX_INITIALIZER_NP;
       static unsigned anon_count = 1;
-      identifier = ralloc_asprintf(this, "#anon_struct_%04x", anon_count);
-      anon_count++;
+      unsigned count;
+
+      mtx_lock(&mutex);
+      count = anon_count++;
+      mtx_unlock(&mutex);
+
+      identifier = ralloc_asprintf(this, "#anon_struct_%04x", count);
    }
    name = identifier;
    this->declarations.push_degenerate_list_at_head(&declarator_list->link);
@@ -1332,23 +1345,47 @@ set_shader_inout_layout(struct gl_shader *shader,
       /* Should have been prevented by the parser. */
       assert(!state->gs_input_prim_type_specified);
       assert(!state->out_qualifier->flags.i);
-      return;
    }
 
-   shader->Geom.VerticesOut = 0;
-   if (state->out_qualifier->flags.q.max_vertices)
-      shader->Geom.VerticesOut = state->out_qualifier->max_vertices;
-
-   if (state->gs_input_prim_type_specified) {
-      shader->Geom.InputType = state->gs_input_prim_type;
-   } else {
-      shader->Geom.InputType = PRIM_UNKNOWN;
+   if (shader->Stage != MESA_SHADER_FRAGMENT) {
+      /* Should have been prevented by the parser. */
+      assert(!state->fs_uses_gl_fragcoord);
+      assert(!state->fs_redeclares_gl_fragcoord);
+      assert(!state->fs_pixel_center_integer);
+      assert(!state->fs_origin_upper_left);
    }
 
-   if (state->out_qualifier->flags.q.prim_type) {
-      shader->Geom.OutputType = state->out_qualifier->prim_type;
-   } else {
-      shader->Geom.OutputType = PRIM_UNKNOWN;
+   switch(shader->Stage) {
+   case MESA_SHADER_GEOMETRY:
+      shader->Geom.VerticesOut = 0;
+      if (state->out_qualifier->flags.q.max_vertices)
+         shader->Geom.VerticesOut = state->out_qualifier->max_vertices;
+
+      if (state->gs_input_prim_type_specified) {
+         shader->Geom.InputType = state->gs_input_prim_type;
+      } else {
+         shader->Geom.InputType = PRIM_UNKNOWN;
+      }
+
+      if (state->out_qualifier->flags.q.prim_type) {
+         shader->Geom.OutputType = state->out_qualifier->prim_type;
+      } else {
+         shader->Geom.OutputType = PRIM_UNKNOWN;
+      }
+      break;
+
+   case MESA_SHADER_FRAGMENT:
+      shader->redeclares_gl_fragcoord = state->fs_redeclares_gl_fragcoord;
+      shader->uses_gl_fragcoord = state->fs_uses_gl_fragcoord;
+      shader->pixel_center_integer = state->fs_pixel_center_integer;
+      shader->origin_upper_left = state->fs_origin_upper_left;
+      shader->ARB_fragment_coord_conventions_enable =
+         state->ARB_fragment_coord_conventions_enable;
+      break;
+
+    default:
+      /* Nothing to do. */
+      break;
    }
 }
 
@@ -1523,6 +1560,8 @@ extern "C" {
 void
 _mesa_destroy_shader_compiler(void)
 {
+   _mesa_glsl_destroy_threadpool();
+
    _mesa_destroy_shader_compiler_caches();
 
    _mesa_glsl_release_types();
@@ -1536,6 +1575,7 @@ _mesa_destroy_shader_compiler(void)
 void
 _mesa_destroy_shader_compiler_caches(void)
 {
+   _mesa_glsl_wait_threadpool();
    _mesa_glsl_release_builtin_functions();
 }
 

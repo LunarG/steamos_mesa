@@ -44,7 +44,7 @@
 static const struct debug_named_value r600_debug_options[] = {
 	/* features */
 #if defined(R600_USE_LLVM)
-	{ "nollvm", DBG_NO_LLVM, "Disable the LLVM shader compiler" },
+	{ "llvm", DBG_LLVM, "Enable the LLVM shader compiler" },
 #endif
 	{ "nocpdma", DBG_NO_CP_DMA, "Disable CP DMA" },
 	{ "nodma", DBG_NO_ASYNC_DMA, "Disable asynchronous DMA" },
@@ -419,15 +419,17 @@ static int r600_get_param(struct pipe_screen* pscreen, enum pipe_cap param)
 
 	/* Texturing. */
 	case PIPE_CAP_MAX_TEXTURE_2D_LEVELS:
-	case PIPE_CAP_MAX_TEXTURE_3D_LEVELS:
 	case PIPE_CAP_MAX_TEXTURE_CUBE_LEVELS:
 		if (family >= CHIP_CEDAR)
 			return 15;
 		else
 			return 14;
+	case PIPE_CAP_MAX_TEXTURE_3D_LEVELS:
+		/* textures support 8192, but layered rendering supports 2048 */
+		return 12;
 	case PIPE_CAP_MAX_TEXTURE_ARRAY_LAYERS:
-		return rscreen->b.info.drm_minor >= 9 ?
-			(family >= CHIP_CEDAR ? 16384 : 8192) : 0;
+		/* textures support 8192, but layered rendering supports 2048 */
+		return rscreen->b.info.drm_minor >= 9 ? 2048 : 0;
 	case PIPE_CAP_MAX_COMBINED_SAMPLERS:
 		return 48;
 
@@ -589,8 +591,8 @@ struct pipe_screen *r600_screen_create(struct radeon_winsys *ws)
 		rscreen->b.debug_flags |= DBG_FS | DBG_VS | DBG_GS | DBG_PS | DBG_CS;
 	if (debug_get_bool_option("R600_HYPERZ", FALSE))
 		rscreen->b.debug_flags |= DBG_HYPERZ;
-	if (!debug_get_bool_option("R600_LLVM", TRUE))
-		rscreen->b.debug_flags |= DBG_NO_LLVM;
+	if (debug_get_bool_option("R600_LLVM", FALSE))
+		rscreen->b.debug_flags |= DBG_LLVM;
 
 	if (rscreen->b.family == CHIP_UNKNOWN) {
 		fprintf(stderr, "r600: Unknown chipset 0x%04X\n", rscreen->b.info.pci_id);

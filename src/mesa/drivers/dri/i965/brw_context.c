@@ -548,6 +548,15 @@ brw_process_driconf_options(struct brw_context *brw)
 
    ctx->Const.DisableGLSLLineContinuations =
       driQueryOptionb(options, "disable_glsl_line_continuations");
+
+   const int multithread_glsl_compiler =
+      driQueryOptioni(options, "multithread_glsl_compiler");
+   if (multithread_glsl_compiler > 0) {
+      const int max_threads = (multithread_glsl_compiler > 1) ?
+         multithread_glsl_compiler : 2;
+
+      _mesa_enable_glsl_threadpool(ctx, max_threads);
+   }
 }
 
 GLboolean
@@ -680,6 +689,8 @@ brwCreateContext(gl_api api,
    /* Reinitialize the context point state.  It depends on ctx->Const values. */
    _mesa_init_point(ctx);
 
+   intel_fbo_init(brw);
+
    intel_batchbuffer_init(brw);
 
    if (brw->gen >= 6) {
@@ -703,17 +714,7 @@ brwCreateContext(gl_api api,
 
    intelInitExtensions(ctx);
 
-   intel_fbo_init(brw);
-
    brw_init_surface_formats(brw);
-
-   if (brw->is_g4x || brw->gen >= 5) {
-      brw->CMD_VF_STATISTICS = GM45_3DSTATE_VF_STATISTICS;
-      brw->CMD_PIPELINE_SELECT = CMD_PIPELINE_SELECT_GM45;
-  } else {
-      brw->CMD_VF_STATISTICS = GEN4_3DSTATE_VF_STATISTICS;
-      brw->CMD_PIPELINE_SELECT = CMD_PIPELINE_SELECT_965;
-   }
 
    brw->max_vs_threads = devinfo->max_vs_threads;
    brw->max_gs_threads = devinfo->max_gs_threads;

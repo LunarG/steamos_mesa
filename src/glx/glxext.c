@@ -249,6 +249,10 @@ glx_display_free(struct glx_display *priv)
    if (priv->dri2Display)
       (*priv->dri2Display->destroyDisplay) (priv->dri2Display);
    priv->dri2Display = NULL;
+
+   if (priv->dri3Display)
+      (*priv->dri3Display->destroyDisplay) (priv->dri3Display);
+   priv->dri3Display = NULL;
 #endif
 
    free((char *) priv);
@@ -825,7 +829,6 @@ __glXInitialize(Display * dpy)
    dpyPriv->codes = XInitExtension(dpy, __glXExtensionName);
    if (!dpyPriv->codes) {
       free(dpyPriv);
-      _XUnlockMutex(_Xglobal_lock);
       return NULL;
    }
 
@@ -841,7 +844,6 @@ __glXInitialize(Display * dpy)
 		     &dpyPriv->majorVersion, &dpyPriv->minorVersion)
        || (dpyPriv->majorVersion == 1 && dpyPriv->minorVersion < 1)) {
       free(dpyPriv);
-      _XUnlockMutex(_Xglobal_lock);
       return NULL;
    }
 
@@ -906,7 +908,7 @@ __glXInitialize(Display * dpy)
    dpyPriv->next = glx_displays;
    glx_displays = dpyPriv;
 
-    _XUnlockMutex(_Xglobal_lock);
+   _XUnlockMutex(_Xglobal_lock);
 
    return dpyPriv;
 }

@@ -599,6 +599,12 @@ static void r600_copy_buffer(struct pipe_context *ctx, struct pipe_resource *dst
 	} else {
 		util_resource_copy_region(ctx, dst, 0, dstx, 0, 0, src, 0, src_box);
 	}
+
+	/* The index buffer (VGT) doesn't seem to see the result of the copying.
+	 * Can we somehow flush the index buffer cache? Starting a new IB seems
+	 * to do the trick. */
+	if (rctx->b.chip_class <= R700)
+		rctx->b.rings.gfx.flush(ctx, RADEON_FLUSH_ASYNC);
 }
 
 /**
@@ -679,6 +685,7 @@ static void r600_resource_copy_region(struct pipe_context *ctx,
 	struct pipe_surface *dst_view, dst_templ;
 	struct pipe_sampler_view src_templ, *src_view;
 	unsigned dst_width, dst_height, src_width0, src_height0, src_widthFL, src_heightFL;
+	unsigned src_force_level = 0;
 	struct pipe_box sbox, dstbox;
 
 	/* Handle buffers first. */
@@ -737,6 +744,8 @@ static void r600_resource_copy_region(struct pipe_context *ctx,
 		sbox.height = util_format_get_nblocksy(src->format, src_box->height);
 		sbox.depth = src_box->depth;
 		src_box = &sbox;
+
+		src_force_level = src_level;
 	} else if (!util_blitter_is_copy_supported(rctx->blitter, dst, src)) {
 		if (util_format_is_subsampled_2x1_32bpp(src->format)) {
 
@@ -789,7 +798,8 @@ static void r600_resource_copy_region(struct pipe_context *ctx,
 
 	if (rctx->b.chip_class >= EVERGREEN) {
 		src_view = evergreen_create_sampler_view_custom(ctx, src, &src_templ,
-								src_width0, src_height0);
+								src_width0, src_height0,
+								src_force_level);
 	} else {
 		src_view = r600_create_sampler_view_custom(ctx, src, &src_templ,
 							   src_widthFL, src_heightFL);

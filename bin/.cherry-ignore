@@ -1,0 +1,28 @@
+# This patch does not apply cleanly, author says it can be skipped.
+dff3eccd158d648482bb47118ef5d57a9186e5a4
+
+# And this one depends on the above, author says it too can be skipped.
+ac35ded4733883037316d556af596524e5e02535
+
+# This patch introduces some regressions. See:
+# https://bugs.freedesktop.org/show_bug.cgi?id=77443
+1afe3359258a9e89b62c8638761f52d78f6d1cbc
+
+# Author retracted this from consideration for stable branch
+3e817e7e56806d8adb8f16c35136045c29908944
+
+# And this one was simply a bug fix for the previously-retracted commit
+2bab95973d8ad3a84f62670143d6f26c230d9582
+
+# Here we have a commit, and its subsequent "revert" both proposed within a
+# single window of the stable release. So we can achieve the same final effect
+# by ignoring both of the commits.
+e3cc0d90e14e62a0a787b6c07a6df0f5c84039be
+0d5ec2c615784929be095951f9269773a790a2dd
+
+# The function being modified here (_eglCreateWindowSurfaceCommon) does not
+# exist in the 10.1 branch.
+91ff0d4c6510dc38f279c586ced17fba917873e7
+
+# This patch is not needed (modifies work only in 10.2)
+6980cae6aeb6671b6b0245e20a2d34957c1fff0a

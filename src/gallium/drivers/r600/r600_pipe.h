@@ -42,7 +42,7 @@
 
 /* the number of CS dwords for flushing and drawing */
 #define R600_MAX_FLUSH_CS_DWORDS	16
-#define R600_MAX_DRAW_CS_DWORDS		34
+#define R600_MAX_DRAW_CS_DWORDS		37
 #define R600_TRACE_CS_DWORDS		7
 
 #define R600_MAX_USER_CONST_BUFFERS 13
@@ -195,7 +195,7 @@ struct r600_gs_rings_state {
 
 /* This must start from 16. */
 /* features */
-#define DBG_NO_LLVM		(1 << 17)
+#define DBG_LLVM		(1 << 17)
 #define DBG_NO_CP_DMA		(1 << 18)
 #define DBG_NO_ASYNC_DMA	(1 << 19)
 /* shader backend */
@@ -235,6 +235,7 @@ struct r600_rasterizer_state {
 	unsigned                        clip_plane_enable;
 	unsigned			pa_sc_line_stipple;
 	unsigned			pa_cl_clip_cntl;
+	unsigned			pa_su_sc_mode_cntl;
 	float				offset_units;
 	float				offset_scale;
 	bool				offset_enable;
@@ -511,7 +512,8 @@ struct pipe_sampler_view *
 evergreen_create_sampler_view_custom(struct pipe_context *ctx,
 				     struct pipe_resource *texture,
 				     const struct pipe_sampler_view *state,
-				     unsigned width0, unsigned height0);
+				     unsigned width0, unsigned height0,
+				     unsigned force_level);
 void evergreen_init_common_regs(struct r600_command_buffer *cb,
 				enum chip_class ctx_chip_class,
 				enum radeon_family ctx_family,
@@ -825,20 +827,39 @@ static INLINE uint32_t S_FIXED(float value, uint32_t frac_bits)
 }
 #define ALIGN_DIVUP(x, y) (((x) + (y) - 1) / (y))
 
-static inline unsigned r600_tex_aniso_filter(unsigned filter)
-{
-	if (filter <= 1)   return 0;
-	if (filter <= 2)   return 1;
-	if (filter <= 4)   return 2;
-	if (filter <= 8)   return 3;
-	 /* else */        return 4;
-}
-
 /* 12.4 fixed-point */
 static INLINE unsigned r600_pack_float_12p4(float x)
 {
 	return x <= 0    ? 0 :
 	       x >= 4096 ? 0xffff : x * 16;
+}
+
+#define     V_028A6C_OUTPRIM_TYPE_POINTLIST            0
+#define     V_028A6C_OUTPRIM_TYPE_LINESTRIP            1
+#define     V_028A6C_OUTPRIM_TYPE_TRISTRIP             2
+
+static INLINE unsigned r600_conv_prim_to_gs_out(unsigned mode)
+{
+	static const int prim_conv[] = {
+		V_028A6C_OUTPRIM_TYPE_POINTLIST,
+		V_028A6C_OUTPRIM_TYPE_LINESTRIP,
+		V_028A6C_OUTPRIM_TYPE_LINESTRIP,
+		V_028A6C_OUTPRIM_TYPE_LINESTRIP,
+		V_028A6C_OUTPRIM_TYPE_TRISTRIP,
+		V_028A6C_OUTPRIM_TYPE_TRISTRIP,
+		V_028A6C_OUTPRIM_TYPE_TRISTRIP,
+		V_028A6C_OUTPRIM_TYPE_TRISTRIP,
+		V_028A6C_OUTPRIM_TYPE_TRISTRIP,
+		V_028A6C_OUTPRIM_TYPE_TRISTRIP,
+		V_028A6C_OUTPRIM_TYPE_LINESTRIP,
+		V_028A6C_OUTPRIM_TYPE_LINESTRIP,
+		V_028A6C_OUTPRIM_TYPE_TRISTRIP,
+		V_028A6C_OUTPRIM_TYPE_TRISTRIP,
+		V_028A6C_OUTPRIM_TYPE_TRISTRIP
+	};
+	assert(mode < Elements(prim_conv));
+
+	return prim_conv[mode];
 }
 
 #endif

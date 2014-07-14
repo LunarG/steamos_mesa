@@ -927,7 +927,8 @@ static void *evergreen_create_rs_state(struct pipe_context *ctx,
 		S_028810_PS_UCP_MODE(3) |
 		S_028810_ZCLIP_NEAR_DISABLE(!state->depth_clip) |
 		S_028810_ZCLIP_FAR_DISABLE(!state->depth_clip) |
-		S_028810_DX_LINEAR_ATTR_CLIP_ENA(1);
+		S_028810_DX_LINEAR_ATTR_CLIP_ENA(1) |
+		S_028810_DX_RASTERIZATION_KILL(state->rasterizer_discard);
 	rs->multisample_enable = state->multisample;
 
 	/* offset */
@@ -996,7 +997,6 @@ static void *evergreen_create_rs_state(struct pipe_context *ctx,
 						  state->fill_back != PIPE_POLYGON_MODE_FILL) |
 			       S_028814_POLYMODE_FRONT_PTYPE(r600_translate_fill(state->fill_front)) |
 			       S_028814_POLYMODE_BACK_PTYPE(r600_translate_fill(state->fill_back)));
-	r600_store_context_reg(&rs->buffer, R_028350_SX_MISC, S_028350_MULTIPASS(state->rasterizer_discard));
 	return rs;
 }
 
@@ -1097,7 +1097,8 @@ struct pipe_sampler_view *
 evergreen_create_sampler_view_custom(struct pipe_context *ctx,
 				     struct pipe_resource *texture,
 				     const struct pipe_sampler_view *state,
-				     unsigned width0, unsigned height0)
+				     unsigned width0, unsigned height0,
+				     unsigned force_level)
 {
 	struct r600_screen *rscreen = (struct r600_screen*)ctx->screen;
 	struct r600_pipe_sampler_view *view = CALLOC_STRUCT(r600_pipe_sampler_view);
@@ -1109,6 +1110,8 @@ evergreen_create_sampler_view_custom(struct pipe_context *ctx,
 	unsigned macro_aspect, tile_split, bankh, bankw, nbanks, fmask_bankh;
 	enum pipe_format pipe_format = state->format;
 	struct radeon_surface_level *surflevel;
+	unsigned base_level, first_level, last_level;
+	uint64_t va;
 
 	if (view == NULL)
 		return NULL;
@@ -1165,13 +1168,26 @@ evergreen_create_sampler_view_custom(struct pipe_context *ctx,
 
 	endian = r600_colorformat_endian_swap(format);
 
+	base_level = 0;
+	first_level = state->u.tex.first_level;
+	last_level = state->u.tex.last_level;
 	width = width0;
 	height = height0;
 	depth = texture->depth0;
-	pitch = surflevel[0].nblk_x * util_format_get_blockwidth(pipe_format);
+
+	if (force_level) {
+		base_level = force_level;
+		first_level = 0;
+		last_level = 0;
+		width = u_minify(width, force_level);
+		height = u_minify(height, force_level);
+		depth = u_minify(depth, force_level);
+	}
+
+	pitch = surflevel[base_level].nblk_x * util_format_get_blockwidth(pipe_format);
 	non_disp_tiling = tmp->non_disp_tiling;
 
-	switch (surflevel[0].mode) {
+	switch (surflevel[base_level].mode) {
 	case RADEON_SURF_MODE_LINEAR_ALIGNED:
 		array_mode = V_028C70_ARRAY_LINEAR_ALIGNED;
 		break;
@@ -1210,6 +1226,8 @@ evergreen_create_sampler_view_custom(struct pipe_context *ctx,
 	} else if (texture->target == PIPE_TEXTURE_CUBE_ARRAY)
 		depth = texture->array_size / 6;
 
+	va = r600_resource_va(ctx->screen, texture);
+
 	view->tex_resource = &tmp->resource;
 	view->tex_resource_words[0] = (S_030000_DIM(r600_tex_dim(texture->target, texture->nr_samples)) |
 				       S_030000_PITCH((pitch / 8) - 1) |
@@ -1221,7 +1239,7 @@ evergreen_create_sampler_view_custom(struct pipe_context *ctx,
 	view->tex_resource_words[1] = (S_030004_TEX_HEIGHT(height - 1) |
 				       S_030004_TEX_DEPTH(depth - 1) |
 				       S_030004_ARRAY_MODE(array_mode));
-	view->tex_resource_words[2] = (surflevel[0].offset + r600_resource_va(ctx->screen, texture)) >> 8;
+	view->tex_resource_words[2] = (surflevel[base_level].offset + va) >> 8;
 
 	/* TEX_RESOURCE_WORD3.MIP_ADDRESS */
 	if (texture->nr_samples > 1 && rscreen->has_compressed_msaa_texturing) {
@@ -1231,12 +1249,12 @@ evergreen_create_sampler_view_custom(struct pipe_context *ctx,
 			view->skip_mip_address_reloc = true;
 		} else {
 			/* FMASK should be in MIP_ADDRESS for multisample textures */
-			view->tex_resource_words[3] = (tmp->fmask.offset + r600_resource_va(ctx->screen, texture)) >> 8;
+			view->tex_resource_words[3] = (tmp->fmask.offset + va) >> 8;
 		}
-	} else if (state->u.tex.last_level && texture->nr_samples <= 1) {
-		view->tex_resource_words[3] = (surflevel[1].offset + r600_resource_va(ctx->screen, texture)) >> 8;
+	} else if (last_level && texture->nr_samples <= 1) {
+		view->tex_resource_words[3] = (surflevel[1].offset + va) >> 8;
 	} else {
-		view->tex_resource_words[3] = (surflevel[0].offset + r600_resource_va(ctx->screen, texture)) >> 8;
+		view->tex_resource_words[3] = (surflevel[base_level].offset + va) >> 8;
 	}
 
 	view->tex_resource_words[4] = (word4 |
@@ -1255,8 +1273,8 @@ evergreen_create_sampler_view_custom(struct pipe_context *ctx,
 		view->tex_resource_words[5] |= S_030014_LAST_LEVEL(log_samples);
 		view->tex_resource_words[6] |= S_030018_FMASK_BANK_HEIGHT(fmask_bankh);
 	} else {
-		view->tex_resource_words[4] |= S_030010_BASE_LEVEL(state->u.tex.first_level);
-		view->tex_resource_words[5] |= S_030014_LAST_LEVEL(state->u.tex.last_level);
+		view->tex_resource_words[4] |= S_030010_BASE_LEVEL(first_level);
+		view->tex_resource_words[5] |= S_030014_LAST_LEVEL(last_level);
 		/* aniso max 16 samples */
 		view->tex_resource_words[6] |= S_030018_MAX_ANISO(4);
 	}
@@ -1277,7 +1295,7 @@ evergreen_create_sampler_view(struct pipe_context *ctx,
 			      const struct pipe_sampler_view *state)
 {
 	return evergreen_create_sampler_view_custom(ctx, tex, state,
-						    tex->width0, tex->height0);
+						    tex->width0, tex->height0, 0);
 }
 
 static void evergreen_emit_clip_state(struct r600_context *rctx, struct r600_atom *atom)
@@ -1824,7 +1842,10 @@ static void evergreen_set_framebuffer_state(struct pipe_context *ctx,
 	}
 
 	log_samples = util_logbase2(rctx->framebuffer.nr_samples);
-	if (rctx->b.chip_class == CAYMAN && rctx->db_misc_state.log_samples != log_samples) {
+	/* This is for Cayman to program SAMPLE_RATE, and for RV770 to fix a hw bug. */
+	if ((rctx->b.chip_class == CAYMAN ||
+	     rctx->b.family == CHIP_RV770) &&
+	    rctx->db_misc_state.log_samples != log_samples) {
 		rctx->db_misc_state.log_samples = log_samples;
 		rctx->db_misc_state.atom.dirty = true;
 	}
@@ -2809,7 +2830,9 @@ void cayman_init_common_regs(struct r600_command_buffer *cb,
 
 	r600_store_context_reg(cb, R_028A4C_PA_SC_MODE_CNTL_1, 0);
 
-	r600_store_context_reg(cb, R_028354_SX_SURFACE_SYNC, S_028354_SURFACE_SYNC_MASK(0xf));
+	r600_store_context_reg_seq(cb, R_028350_SX_MISC, 2);
+	r600_store_value(cb, 0);
+	r600_store_value(cb, S_028354_SURFACE_SYNC_MASK(0xf));
 
 	r600_store_context_reg(cb, R_028800_DB_DEPTH_CONTROL, 0);
 }
@@ -3085,7 +3108,9 @@ void evergreen_init_common_regs(struct r600_command_buffer *cb,
 	/* The cs checker requires this register to be set. */
 	r600_store_context_reg(cb, R_028800_DB_DEPTH_CONTROL, 0);
 
-	r600_store_context_reg(cb, R_028354_SX_SURFACE_SYNC, S_028354_SURFACE_SYNC_MASK(0xf));
+	r600_store_context_reg_seq(cb, R_028350_SX_MISC, 2);
+	r600_store_value(cb, 0);
+	r600_store_value(cb, S_028354_SURFACE_SYNC_MASK(0xf));
 
 	return;
 }
@@ -3603,30 +3628,6 @@ void evergreen_update_es_state(struct pipe_context *ctx, struct r600_pipe_shader
 	/* After that, the NOP relocation packet must be emitted (shader->bo, RADEON_USAGE_READ). */
 }
 
-static unsigned r600_conv_prim_to_gs_out(unsigned mode)
-{
-	static const int prim_conv[] = {
-		V_028A6C_OUTPRIM_TYPE_POINTLIST,
-		V_028A6C_OUTPRIM_TYPE_LINESTRIP,
-		V_028A6C_OUTPRIM_TYPE_LINESTRIP,
-		V_028A6C_OUTPRIM_TYPE_LINESTRIP,
-		V_028A6C_OUTPRIM_TYPE_TRISTRIP,
-		V_028A6C_OUTPRIM_TYPE_TRISTRIP,
-		V_028A6C_OUTPRIM_TYPE_TRISTRIP,
-		V_028A6C_OUTPRIM_TYPE_TRISTRIP,
-		V_028A6C_OUTPRIM_TYPE_TRISTRIP,
-		V_028A6C_OUTPRIM_TYPE_TRISTRIP,
-		V_028A6C_OUTPRIM_TYPE_LINESTRIP,
-		V_028A6C_OUTPRIM_TYPE_LINESTRIP,
-		V_028A6C_OUTPRIM_TYPE_TRISTRIP,
-		V_028A6C_OUTPRIM_TYPE_TRISTRIP,
-		V_028A6C_OUTPRIM_TYPE_TRISTRIP
-	};
-	assert(mode < Elements(prim_conv));
-
-	return prim_conv[mode];
-}
-
 void evergreen_update_gs_state(struct pipe_context *ctx, struct r600_pipe_shader *shader)
 {
 	struct r600_context *rctx = (struct r600_context *)ctx;
@@ -3727,6 +3728,7 @@ void evergreen_update_vs_state(struct pipe_context *ctx, struct r600_pipe_shader
 		S_02881C_VS_OUT_CCDIST1_VEC_ENA((rshader->clip_dist_write & 0xF0) != 0) |
 		S_02881C_VS_OUT_MISC_VEC_ENA(rshader->vs_out_misc_write) |
 		S_02881C_USE_VTX_POINT_SIZE(rshader->vs_out_point_size) |
+		S_02881C_USE_VTX_EDGE_FLAG(rshader->vs_out_edgeflag) |
 		S_02881C_USE_VTX_RENDER_TARGET_INDX(rshader->vs_out_layer);
 }
 

@@ -1144,8 +1144,6 @@ _mesa_initialize_context(struct gl_context *ctx,
 
    ctx->FirstTimeCurrent = GL_TRUE;
 
-   mesa_program_diskcache_init(ctx);
-
    return GL_TRUE;
 
 fail:

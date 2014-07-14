@@ -1977,7 +1977,8 @@ ir_to_mesa_visitor::visit(ir_texture *ir)
    ir_to_mesa_instruction *inst = NULL;
    prog_opcode opcode = OPCODE_NOP;
 
-   if (ir->op == ir_txs)
+   /* Neither opcode uses coordinate */
+   if (ir->op == ir_txs || ir->op == ir_query_levels)
       this->result = src_reg_for_float(0.0);
    else
       ir->coordinate->accept(this);
@@ -3086,7 +3087,7 @@ _mesa_glsl_link_shader(struct gl_context *ctx, struct gl_shader_program *prog)
    }
 
    /* Search program disk cache if active. */
-   if (ctx->BinaryCacheActive && mesa_program_diskcache_find(prog) == 0)
+   if (ctx->BinaryProgramCacheActive && mesa_program_diskcache_find(ctx, prog) == 0)
       return;
 
    if (prog->LinkStatus) {
@@ -3097,8 +3098,8 @@ _mesa_glsl_link_shader(struct gl_context *ctx, struct gl_shader_program *prog)
       if (!ctx->Driver.LinkShader(ctx, prog)) {
 	 prog->LinkStatus = GL_FALSE;
       } else {
-         if (ctx->BinaryCacheActive)
-            mesa_program_diskcache_cache(prog);
+         if (ctx->BinaryProgramCacheActive)
+            mesa_program_diskcache_cache(ctx, prog);
          prog->_Linked = GL_TRUE;
       }
    }

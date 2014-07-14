@@ -33,7 +33,6 @@
 #include "ir.h"
 
 #ifdef __cplusplus
-#include "shader_cache_magic.h"
 const uint32_t cache_validation_data[] = {
    ir_type_max,
    GLSL_TYPE_ERROR,
@@ -78,21 +77,47 @@ enum {
    MESA_SHADER_DESERIALIZE_VERSION_ERROR = -2,
 };
 
-char *
-mesa_shader_serialize(struct gl_shader *shader, size_t *size);
+const char *
+mesa_get_shader_cache_magic();
 
 char *
-mesa_program_serialize(struct gl_shader_program *prog, size_t *size);
+mesa_shader_serialize(struct gl_context *ctx, struct gl_shader *shader,
+                      size_t *size, bool shader_only);
+
+char *
+mesa_program_serialize(struct gl_context *ctx, struct gl_shader_program *prog,
+                       size_t *size);
+
+int
+mesa_program_deserialize(struct gl_context *ctx, struct gl_shader_program *prog,
+                         const GLvoid *data, size_t size);
+
+int
+mesa_program_load(struct gl_context *ctx, struct gl_shader_program *prog,
+                  const char *path);
 
 struct gl_shader *
-mesa_shader_deserialize(void *mem_ctx, void *data, size_t size);
+read_single_shader(struct gl_context *ctx, struct gl_shader *shader,
+                   const char* path);
 
 int
-mesa_program_deserialize(struct gl_shader_program *prog, const GLvoid *data,
-                         size_t size);
+mesa_shader_load(struct gl_context *ctx, struct gl_shader *shader,
+                 const char *path);
 
-int
-mesa_program_load(struct gl_shader_program *prog, const char *path);
+struct gl_shader *
+mesa_shader_deserialize(struct gl_context *ctx, struct gl_shader *shader,
+                        const char* path);
+
+/**
+ * Features not currently supported by the caches.
+ */
+bool
+supported_by_program_cache(struct gl_shader_program *prog, bool is_write);
+
+bool
+supported_by_shader_cache(struct gl_shader *shader, bool is_write);
+
+
 
 #ifdef __cplusplus
 } /* extern "C" */

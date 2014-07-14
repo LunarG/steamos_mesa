@@ -156,6 +156,13 @@ public:
       if (len == 0)
          return NULL;
 
+      /* don't read off the end of cache */
+      /* TODO: Understand how this can happen and fix */
+      if (len + position() > cache_size) {
+         error = true;
+         return NULL;
+      }
+
       /* verify that last character is terminator */
       if (*(cache_mmap_p + len - 1) != '\0') {
          error = true;

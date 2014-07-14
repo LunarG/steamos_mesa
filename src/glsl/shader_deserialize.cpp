@@ -158,20 +158,79 @@ resolve_uniform_types(struct gl_shader_program *prog, struct gl_shader *sha)
 }
 
 
-/* read and serialize a gl_shader */
-static gl_shader *
-read_shader(void *mem_ctx, memory_map &map, ir_deserializer &s)
+static bool
+validate_binary_cache(struct gl_context *ctx, memory_map &map)
 {
-   struct gl_shader *shader = NULL;
+   assert(ctx);
+   uint32_t data[num_cache_validation_data_items];
+
+   // read the cache sentinel here, ensure it is non-zero, meaning
+   // cache entry is complete
+   uint32_t cache_sentinel = 0;
+   map.read(&cache_sentinel, sizeof(cache_sentinel));
+   if (cache_sentinel == 0)
+      return false;
+
+   map.read(&data, sizeof(cache_validation_data));
+
+   /* validation data (common struct sizes) must match */
+   if (memcmp(&data, cache_validation_data, sizeof(cache_validation_data)))
+      return false;
+
+   char *cache_magic_id = map.read_string();
+   char *cache_vendor = map.read_string();
+   char *cache_renderer = map.read_string();
+
+   const char *mesa_magic_id = mesa_get_shader_cache_magic();
+
+   const char *mesa_vendor =
+      (const char *) ctx->Driver.GetString(ctx, GL_VENDOR);
+   const char *mesa_renderer =
+      (const char *) ctx->Driver.GetString(ctx, GL_RENDERER);
+
+   // Ensure we didn't get something bad back from cache somehow
+   if (! (cache_magic_id && cache_vendor && cache_renderer &&
+           mesa_magic_id && mesa_vendor  && mesa_renderer))
+           return false;
+
+   /* check if cache was created with another driver */
+   if ((strcmp(mesa_vendor, cache_vendor)) ||
+      (strcmp(mesa_renderer, cache_renderer)))
+         return false;
+
+   /* check against different version of mesa */
+   if (strcmp(cache_magic_id, mesa_magic_id))
+      return false;
+
+   return true;
+}
+
+
+/* read and serialize a gl_shader */
+static struct gl_shader *
+read_shader_in_place(struct gl_context *ctx, void *mem_ctx, memory_map &map, ir_deserializer &s, struct gl_shader *shader)
+{
+   assert(ctx);
    struct gl_program *prog = NULL;
    gl_shader_stage stage;
-   GET_CURRENT_CONTEXT(ctx);
+
+   // If shader is NULL, we are in program path, and need to check sentinel
+   // In shader_only path, sentinel has already been read by validate_binary_cache
+   if (shader == NULL) {
+      uint32_t shader_sentinel = map.read_uint32_t();
+      if (shader_sentinel == 0)
+         return NULL;
+   }
 
    uint32_t shader_size = map.read_uint32_t();
    uint32_t type = map.read_uint32_t();
 
    GLuint name;
    GLint refcount;
+   const char* source;
+
+   bool shader_cleanup = false;
+   bool program_cleanup = false;
 
    /* Useful information for debugging. */
    (void) shader_size;
@@ -186,19 +245,37 @@ read_shader(void *mem_ctx, memory_map &map, ir_deserializer &s)
          goto error_deserialize;
    }
 
-   shader = ctx->Driver.NewShader(NULL, 0, type);
+   if(!shader) {
+      shader_cleanup = true;
+      shader = ctx->Driver.NewShader(NULL, 0, type);
+   }
 
    if (!shader)
       return NULL;
 
+   /* Set the fields we already know */
    name = shader->Name;
    refcount = shader->RefCount;
+   source = shader->Source;
+
+   /* If anything has been added to gl_shader_program, we need to grok it for
+    * deserialization.  i.e. does it make sense to cache a mutex id?  No.
+    * Below is size for mesa-10.2.5 with deferred compilation.
+    */
+   #if defined(i386) || defined(__i386__)
+      STATIC_ASSERT(sizeof(gl_shader) == 400);
+   #else
+      STATIC_ASSERT(sizeof(gl_shader) == 464);
+   #endif
 
    /* Reading individual fields and structs would slow us down here. This is
     * slightly dangerous though and we need to take care to initialize any
     * pointers properly.
+    *
+    * Read up to (but exclude) gl_shader::Mutex to avoid races.
     */
-   map.read(shader, sizeof(struct gl_shader));
+   map.read(shader, offsetof(struct gl_shader, Mutex));
+   map.ffwd(sizeof(struct gl_shader) - offsetof(struct gl_shader, Mutex));
 
    /* verify that type from header matches */
    if (shader->Type != type)
@@ -207,10 +284,10 @@ read_shader(void *mem_ctx, memory_map &map, ir_deserializer &s)
    /* Set correct name and refcount. */
    shader->Name = name;
    shader->RefCount = refcount;
+   shader->Source = source;
 
    /* clear all pointer fields, only data preserved */
    shader->Label = NULL;
-   shader->Source = NULL;
    shader->Program = NULL;
    shader->InfoLog = ralloc_strdup(mem_ctx, "");
    shader->UniformBlocks = NULL;
@@ -225,84 +302,88 @@ read_shader(void *mem_ctx, memory_map &map, ir_deserializer &s)
 
    if (!prog)
       goto error_deserialize;
+   else
+      program_cleanup = true;
 
    _mesa_reference_program(ctx, &shader->Program, prog);
 
    /* IR tree */
-   if (!s.deserialize(mem_ctx, shader, &map))
+   if (!s.deserialize(ctx, mem_ctx, shader, &map))
       goto error_deserialize;
 
    return shader;
 
 error_deserialize:
 
-   if (shader)
+   if (shader && shader_cleanup)
       ctx->Driver.DeleteShader(ctx, shader);
+
+   if (prog && program_cleanup)
+      _mesa_reference_program(ctx, &shader->Program, NULL);
 
    return NULL;
 }
 
 
-/**
- * Deserialize gl_shader structure
- */
-extern "C" struct gl_shader *
-mesa_shader_deserialize(void *mem_ctx, void *data, size_t size)
+static gl_shader *
+read_shader(struct gl_context *ctx, void *mem_ctx, memory_map &map, ir_deserializer &s)
 {
-   memory_map map;
-   ir_deserializer s;
-   map.map(data, size);
-   return read_shader(mem_ctx, map, s);
+   assert(ctx);
+   struct gl_shader *shader = NULL;
+   shader = read_shader_in_place(ctx, mem_ctx, map, s, shader);
+   return shader;
 }
 
 
-static bool
-validate_binary_program(struct gl_shader_program *prog, memory_map &map)
+/* read and serialize a gl_shader */
+/* this version is used externally without requiring
+ * creation of ir_deserializer
+ */
+struct gl_shader *
+read_single_shader(struct gl_context *ctx, struct gl_shader *shader, const char* path)
 {
-   uint32_t data[num_cache_validation_data_items];
-   map.read(&data, sizeof(cache_validation_data));
+   assert(ctx);
 
-   /* validation data (common struct sizes) must match */
-   if (memcmp(&data, cache_validation_data, sizeof(cache_validation_data)))
-      return false;
+   ir_deserializer s;
 
-   char *cache_magic_id = map.read_string();
-   char *cache_vendor = map.read_string();
-   char *cache_renderer = map.read_string();
+   memory_map map;
 
-   const char *magic = mesa_get_shader_cache_magic();
+   if (map.map(path))
+      return NULL;
 
-   GET_CURRENT_CONTEXT(ctx);
+   if (validate_binary_cache(ctx, map) == false) {
+      /* Cache binary produced with a different Mesa, remove it. */
+      unlink(path);
+      return NULL;
+   }
 
-   const char *mesa_vendor =
-      (const char *) ctx->Driver.GetString(ctx, GL_VENDOR);
-   const char *mesa_renderer =
-      (const char *) ctx->Driver.GetString(ctx, GL_RENDERER);
-
-   /* check if cache was created with another driver */
-   if ((strcmp(mesa_vendor, cache_vendor)) ||
-      (strcmp(mesa_renderer, cache_renderer)))
-         return false;
-
-   /* check against different version of mesa */
-   if (strcmp(cache_magic_id, magic))
-      return false;
-
-   return true;
+   return read_shader_in_place(ctx, shader, map, s, shader);
 }
 
 
 static int
-deserialize_program(struct gl_shader_program *prog, memory_map &map)
+deserialize_program(struct gl_context *ctx, struct gl_shader_program *prog, memory_map &map)
 {
-   GET_CURRENT_CONTEXT(ctx);
+   assert(ctx);
 
-   if (validate_binary_program(prog, map) == false)
+   if (validate_binary_cache(ctx, map) == false)
       return MESA_SHADER_DESERIALIZE_VERSION_ERROR;
 
    struct gl_shader_program tmp_prog;
 
-   map.read(&tmp_prog, sizeof(gl_shader_program));
+   /* If anything has been added to gl_shader_program, we need to grok it for
+    * deserialization.  i.e. does it make sense to cache a mutex id?  No.
+    * Below is size for mesa-10.2.5 with deferred compilation.
+    */
+   #if defined(i386) || defined(__i386__)
+      STATIC_ASSERT(sizeof(gl_shader_program) == 268);
+   #else
+      STATIC_ASSERT(sizeof(gl_shader_program) == 408);
+   #endif
+
+   /* Read up to (but exclude) gl_shader_program::Mutex to avoid races */
+   map.read(&tmp_prog, offsetof(gl_shader_program, Mutex));
+   map.ffwd(sizeof(gl_shader_program) - offsetof(gl_shader_program, Mutex));
 
    /* Cache does not support compatibility extensions
     * like ARB_ES3_compatibility (yet).
@@ -371,12 +452,10 @@ deserialize_program(struct gl_shader_program *prog, memory_map &map)
    for (unsigned i = 0; i < shader_amount; i++) {
       uint32_t index = map.read_uint32_t();
 
-      struct gl_shader *sha = read_shader(prog, map, s);
+      struct gl_shader *sha = read_shader(ctx, prog, map, s);
 
-      if (!sha) {
-         prog->LinkStatus = false;
+      if (!sha)
          return MESA_SHADER_DESERIALIZE_READ_ERROR;
-      }
 
       resolve_uniform_types(prog, sha);
 
@@ -404,24 +483,27 @@ deserialize_program(struct gl_shader_program *prog, memory_map &map)
  * Deserialize gl_shader_program structure
  */
 extern "C" int
-mesa_program_deserialize(struct gl_shader_program *prog, const GLvoid *data,
-                         size_t size)
+mesa_program_deserialize(struct gl_context *ctx, struct gl_shader_program *prog,
+                         const GLvoid *data, size_t size)
 {
+   assert(ctx);
    memory_map map;
    map.map((const void*) data, size);
-   return deserialize_program(prog, map);
+   return deserialize_program(ctx, prog, map);
 }
 
 
 extern "C" int
-mesa_program_load(struct gl_shader_program *prog, const char *path)
+mesa_program_load(struct gl_context *ctx, struct gl_shader_program *prog,
+                  const char *path)
 {
+   assert(ctx);
    memory_map map;
    int result = 0;
 
    if (map.map(path))
       return -1;
-   result = deserialize_program(prog, map);
+   result = deserialize_program(ctx, prog, map);
 
    /* Cache binary produced with a different Mesa, remove it. */
    if (result == MESA_SHADER_DESERIALIZE_VERSION_ERROR)

@@ -60,6 +60,10 @@ ir_deserializer::read_ir_variable()
 {
    const glsl_type *type = deserialize_glsl_type(map, state, type_ht);
 
+   /* TODO: Understand how this can happen and fix */
+   if (type == glsl_type::error_type)
+      return NULL;
+
    char *name = map->read_string();
    int64_t unique_id = map->read_int64_t();
    uint8_t mode = map->read_uint8_t();
@@ -102,7 +106,7 @@ ir_deserializer::read_ir_variable()
 
    uint8_t has_interface_type = map->read_uint8_t();
 
-   if (has_interface_type)
+   if (has_interface_type && (var->get_interface_type() == NULL))
       var->init_interface_type(deserialize_glsl_type(map, state, type_ht));
    /**
     * Store address to this variable so that variable
@@ -122,27 +126,47 @@ ir_deserializer::read_ir_function(bool prototypes_only)
 
    ir_function *f = new(mem_ctx) ir_function(name);
    ir_function_signature *sig = NULL;
+   uint32_t next_signature = 0;
 
    /* Add all signatures to the function. */
    for (unsigned j = 0; j < num_signatures; j++) {
+
+      if (prototypes_only && next_signature) {
+         /* We're on our >1 iteration of the loop so
+          * we have more than one signature for this function
+          * and must skip ahead to the next signature.
+          */
+         map->jump(next_signature);
+         continue;
+      }
 
       /* Type equals ir_function_signature. */
       uint8_t ir_type = map->read_uint8_t();
       uint32_t len = map->read_uint32_t();
 
+      /* The next sig, if there is one, follows the entire function, not
+       * just the parameters.
+       */
+      if (prototypes_only)
+         next_signature = map->position() + len;
+
       /* Used for debugging. */
       (void) ir_type;
-      (void) len;
 
       assert(ir_type == ir_type_function_signature);
 
       uint8_t is_builtin = map->read_uint8_t();
+
+      uint8_t is_defined = map->read_uint8_t();
 
       const glsl_type *return_type = deserialize_glsl_type(map, state, type_ht);
       if (!return_type)
          return NULL;
 
       sig = new(mem_ctx) ir_function_signature(return_type);
+
+      /* is_defined should be true if original was, even if func is empty */
+      sig->is_defined = is_defined;
 
       /* Fill function signature parameters. */
       if (!deserialize_list(&sig->parameters))
@@ -154,7 +178,6 @@ ir_deserializer::read_ir_function(bool prototypes_only)
          for (unsigned k = 0; k < body_count; k++)
             if (!read_instruction(&sig->body, is_builtin ? true : false))
                return NULL;
-         sig->is_defined = body_count ? 1 : 0;
       }
 
       if (!is_builtin) {
@@ -246,6 +269,10 @@ ir_deserializer::read_ir_constant()
 
    const glsl_type *constant_type = deserialize_glsl_type(map, state, type_ht);
 
+   /* TODO: Understand how this can happen and fix */
+   if (constant_type == glsl_type::error_type)
+      return NULL;
+
    ir_constant_data data;
    map->read(&data, sizeof(data));
 
@@ -256,6 +283,10 @@ ir_deserializer::read_ir_constant()
       for (unsigned i = 0; i < constant_type->length; i++) {
 
          ir_constant *con = read_ir_constant();
+
+         /* TODO: Understand how this can happen and fix */
+         if (!con)
+            return NULL;
 
          /* Break out of the loop if read errors occured. */
          if (map->errors())
@@ -413,8 +444,11 @@ ir_instruction *
 ir_deserializer::read_ir_if()
 {
    ir_rvalue *cond = read_ir_rvalue();
-   ir_if *irif = new(mem_ctx) ir_if(cond);
+   /* TODO: Understand how this can happen and fix */
+   if (!cond)
+      return NULL;
 
+   ir_if *irif = new(mem_ctx) ir_if(cond);
    if (!irif)
       return NULL;
 
@@ -445,7 +479,7 @@ ir_deserializer::read_ir_call()
 
    char *name = map->read_string();
 
-   ir_dereference_variable *return_deref = read_ir_dereference_variable();
+   ir_dereference_variable *return_deref = (ir_dereference_variable *) read_ir_rvalue();
 
    uint8_t list_len = map->read_uint8_t();
 
@@ -603,6 +637,15 @@ ir_deserializer::read_prototypes(unsigned list_len)
       uint8_t ir_type = map->read_uint8_t();
       uint32_t len = map->read_uint32_t();
 
+      if (len > (map->size() - map->position())) {
+         /* We've run off the end for some reason
+          * hopefully we got the protos we need
+          * move on!
+          * TODO: Understand how this can happen and fix
+          */
+         break;
+      }
+
       if (ir_type != ir_type_function) {
          map->ffwd(len);
          continue;
@@ -673,11 +716,11 @@ enable_glsl_extensions(struct _mesa_glsl_parse_state *state)
 
 
 bool
-ir_deserializer::deserialize(void *mem_ctx, gl_shader *shader, memory_map *map)
+ir_deserializer::deserialize(struct gl_context *ctx, void *mem_ctx, gl_shader *shader, memory_map *map)
 {
+   assert(ctx);
    bool success = false;
    uint32_t exec_list_len;
-   GET_CURRENT_CONTEXT(ctx);
 
    /* Allocations use passed ralloc ctx during reading. */
    this->mem_ctx = mem_ctx;

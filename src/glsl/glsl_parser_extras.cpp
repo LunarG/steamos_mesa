@@ -38,6 +38,7 @@ extern "C" {
 #include "main/core.h" /* for struct gl_context */
 #include "main/context.h"
 #include "main/shaderobj.h"
+#include "program/prog_diskcache.h"
 }
 
 #include "ralloc.h"
@@ -47,6 +48,7 @@ extern "C" {
 #include "ir_optimization.h"
 #include "loop_analysis.h"
 #include "threadpool.h"
+
 
 /**
  * Format a short human-readable description of the given GLSL version.
@@ -1735,6 +1737,10 @@ void
 _mesa_glsl_compile_shader_classic(struct gl_context *ctx, struct gl_shader *shader,
                                   bool dump_ast, bool dump_hir)
 {
+   /* Search program disk cache if active. */
+   if (ctx->BinaryShaderCacheActive && mesa_shader_diskcache_find(ctx, shader) == 0)
+      return;
+
    struct _mesa_glsl_parse_state *state =
       new(shader) _mesa_glsl_parse_state(ctx, shader->Stage, shader);
    const char *source = shader->Source;
@@ -1800,6 +1806,9 @@ _mesa_glsl_compile_shader_classic(struct gl_context *ctx, struct gl_shader *shad
 
    /* Retain any live IR, but trash the rest. */
    reparent_ir(shader->ir, shader->ir);
+
+   if (ctx->BinaryShaderCacheActive && shader->CompileStatus)
+      mesa_shader_diskcache_cache(ctx, shader);
 
    ralloc_free(state);
 }

@@ -61,7 +61,7 @@ public:
    }
 
    /* deserialize IR to gl_shader from mapped memory */
-   bool deserialize(void *mem_ctx, gl_shader *shader, memory_map *map);
+   bool deserialize(struct gl_context *ctx, void *mem_ctx, gl_shader *shader, memory_map *map);
 
 private:
 

@@ -242,6 +242,9 @@ ir_function_signature::serialize_data(memory_writer &mem)
    uint8_t builtin_func = is_builtin();
    mem.write_uint8_t(builtin_func);
 
+   uint8_t is_defined = this->is_defined;
+   mem.write_uint8_t(is_defined);
+
    /* dump the return type of function */
    return_type->serialize(mem);
 

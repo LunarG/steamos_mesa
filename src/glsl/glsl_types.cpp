@@ -226,6 +226,10 @@ deserialize_glsl_type(memory_map *map, struct _mesa_glsl_parse_state *state,
                       struct hash_table *type_hash)
 {
    char *name = map->read_string();
+   /* TODO: Understand how this can happen and fix */
+   if (!name)
+      return glsl_type::error_type;
+
    uint32_t type_size = map->read_uint32_t();
    const glsl_type *ret_type = glsl_type::error_type;
 
@@ -304,6 +308,13 @@ deserialize_glsl_type(memory_map *map, struct _mesa_glsl_parse_state *state,
          free((void *)fields[k].name);
       ralloc_free(fields);
 
+      goto return_type;
+   } else if (base_type == GLSL_TYPE_UINT) {
+      /* Support uint as a user type if it wasn't available
+       * in builtin_type_versions.  This can happen during
+       * IR lowering passes.
+       */
+      ret_type = glsl_type::uint_type;
       goto return_type;
    }
 

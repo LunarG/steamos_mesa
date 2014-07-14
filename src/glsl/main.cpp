@@ -289,6 +289,23 @@ usage_fail(const char *name)
    exit(EXIT_FAILURE);
 }
 
+extern "C" {
+/* Stubbed linkage for diskcache, which is not used for standalone compilation */
+extern int
+mesa_shader_diskcache_find(struct gl_context *ctx, struct gl_shader *shader)
+{
+   return 1;
+}
+
+/* Stubbed linkage for diskcache, which is not used for standalone compilation */
+extern int
+mesa_shader_diskcache_cache(struct gl_context *ctx, struct gl_shader *shader)
+{
+   return 1;
+}
+
+} // extern "C"
+
 
 void
 compile_shader(struct gl_context *ctx, struct gl_shader *shader)

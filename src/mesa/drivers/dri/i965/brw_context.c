@@ -66,6 +66,8 @@
 #include "tnl/t_pipeline.h"
 #include "glsl/ralloc.h"
 
+#include "program/prog_diskcache.h"
+
 /***************************************
  * Mesa's Driver Functions
  ***************************************/
@@ -591,6 +593,15 @@ brw_process_driconf_options(struct brw_context *brw)
       ctx->Const.DeferCompileShader = GL_TRUE;
       ctx->Const.DeferLinkProgram = GL_TRUE;
    }
+
+
+   int max_shader_cache_size = 0;
+   max_shader_cache_size = driQueryOptioni(options, "max_shader_cache_size");
+   if (max_shader_cache_size != 0)
+      ctx->Const.MaxShaderCacheSize = (unsigned) max_shader_cache_size;
+
+   mesa_program_diskcache_init(ctx);
+   mesa_shader_diskcache_init(ctx);
 }
 
 GLboolean

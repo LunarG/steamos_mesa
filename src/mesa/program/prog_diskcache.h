@@ -28,13 +28,30 @@
 
 #include "main/mtypes.h"
 
-int
-mesa_program_diskcache_init(struct gl_context *cxt);
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 int
-mesa_program_diskcache_cache(struct gl_shader_program *prog);
+mesa_program_diskcache_init(struct gl_context *ctx);
 
 int
-mesa_program_diskcache_find(struct gl_shader_program *prog);
+mesa_program_diskcache_cache(struct gl_context *ctx, struct gl_shader_program *prog);
+
+int
+mesa_program_diskcache_find(struct gl_context *ctx, struct gl_shader_program *prog);
+
+extern int
+mesa_shader_diskcache_find(struct gl_context *ctx, struct gl_shader *shader);
+
+extern int
+mesa_shader_diskcache_cache(struct gl_context *ctx, struct gl_shader *shader);
+
+int
+mesa_shader_diskcache_init(struct gl_context *ctx);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* PROGRAM_DISKCACHE_H */

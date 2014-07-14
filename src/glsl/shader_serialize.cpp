@@ -25,17 +25,43 @@
 #include "shader_cache.h"
 #include "ir_serialize.h"
 
+#define MESA_SHADER_CACHE_MAGIC __DATE__ " " __TIME__
+
+const char *
+mesa_get_shader_cache_magic()
+{
+   return MESA_SHADER_CACHE_MAGIC;
+}
 
 /**
  * Serializes gl_shader structure, writes shader header
  * information and exec_list of instructions
  */
 extern "C" char *
-mesa_shader_serialize(struct gl_shader *shader, size_t *size)
+mesa_shader_serialize(struct gl_context *ctx, struct gl_shader *shader, size_t *size, bool shader_only)
 {
+   assert(ctx);
+
+   if (!supported_by_shader_cache(shader, true /* is_write */))
+      return NULL;
+
    *size = 0;
 
    memory_writer blob;
+
+   // write the size early for quick completeness checking
+   assert(blob.position() == 0);
+   uint32_t shader_sentinel = 0;
+   blob.write_uint32_t(shader_sentinel);
+
+   if (shader_only) {
+      /* If only serializing shader, we must populate our cache identifiers */
+      blob.write(&cache_validation_data, sizeof(cache_validation_data));
+
+      blob.write_string(mesa_get_shader_cache_magic());
+      blob.write_string((const char *)ctx->Driver.GetString(ctx, GL_VENDOR));
+      blob.write_string((const char *)ctx->Driver.GetString(ctx, GL_RENDERER));
+   }
 
    int32_t start_pos = blob.position();
    uint32_t shader_data_len = 0;
@@ -52,6 +78,12 @@ mesa_shader_serialize(struct gl_shader *shader, size_t *size)
    shader_data_len = blob.position() -
       start_pos - sizeof(shader_data_len);
    blob.overwrite(&shader_data_len, sizeof(shader_data_len), start_pos);
+
+   // write shader length to sentinel for now
+   shader_sentinel = shader_data_len;
+   blob.overwrite(&shader_sentinel, sizeof(shader_sentinel), 0);
+
+   *size = blob.position();
 
    return blob.release_memory(size);
 }
@@ -115,42 +147,25 @@ serialize_uniform_storage(gl_uniform_storage *uni, memory_writer &blob)
    blob.write_uint32_t(size);
 }
 
-
-/**
- * Features not currently supported by the cache.
- */
-static bool
-supported_by_cache(struct gl_shader_program *prog)
-{
-   /* No geometry shader support. */
-   if (prog->_LinkedShaders[MESA_SHADER_GEOMETRY])
-      return false;
-
-   /* No uniform block support. */
-   if (prog->NumUniformBlocks > 0)
-      return false;
-
-   /* No transform feedback support. */
-   if (prog->LinkedTransformFeedback.NumVarying > 0)
-      return false;
-
-   return true;
-}
-
-
 /**
  * Serialize gl_shader_program structure
  */
 extern "C" char *
-mesa_program_serialize(struct gl_shader_program *prog, size_t *size)
+mesa_program_serialize(struct gl_context *ctx, struct gl_shader_program *prog, size_t *size)
 {
-   if (!supported_by_cache(prog))
+   assert(ctx);
+
+   if (!supported_by_program_cache(prog, true /* is_write */))
       return NULL;
 
    memory_writer blob;
-   blob.write(&cache_validation_data, sizeof(cache_validation_data));
 
-   GET_CURRENT_CONTEXT(ctx);
+   // write the size early for quick completeness checking
+   assert(blob.position() == 0);
+   uint32_t program_sentinel = 0;
+   blob.write_uint32_t(program_sentinel);
+
+   blob.write(&cache_validation_data, sizeof(cache_validation_data));
 
    blob.write_string(mesa_get_shader_cache_magic());
    blob.write_string((const char *)ctx->Driver.GetString(ctx, GL_VENDOR));
@@ -187,7 +202,7 @@ mesa_program_serialize(struct gl_shader_program *prog, size_t *size)
       prog->_LinkedShaders[i]->Version = prog->Version;
       prog->_LinkedShaders[i]->IsES = prog->IsES;
 
-      char *data = mesa_shader_serialize(prog->_LinkedShaders[i], &sha_size);
+      char *data = mesa_shader_serialize(ctx, prog->_LinkedShaders[i], &sha_size, false /* shader_only */);
 
       if (!data)
          return NULL;
@@ -205,5 +220,10 @@ mesa_program_serialize(struct gl_shader_program *prog, size_t *size)
    blob.overwrite(&shader_amount, sizeof(shader_amount), shader_amount_pos);
 
    *size = blob.position();
+
+   // write program size to sentinel for now
+   program_sentinel = *size;
+   blob.overwrite(&program_sentinel, sizeof(program_sentinel), 0);
+
    return blob.release_memory(size);
 }

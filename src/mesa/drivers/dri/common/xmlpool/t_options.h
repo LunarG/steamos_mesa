@@ -315,6 +315,10 @@ DRI_CONF_OPT_BEGIN(multithread_glsl_compiler, int, def) \
         DRI_CONF_DESC(en,gettext("Enable multithreading in the GLSL compiler")) \
 DRI_CONF_OPT_END
 
+#define DRI_CONF_MAX_SHADER_CACHE_SIZE(def) \
+DRI_CONF_OPT_BEGIN(max_shader_cache_size, int, def) \
+        DRI_CONF_DESC(en,gettext("Set maximum byte size of shader and program caches")) \
+DRI_CONF_OPT_END
 
 /**
  * \brief Software-fallback options.  To allow using features (like

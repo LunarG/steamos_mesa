@@ -2512,6 +2512,8 @@ struct gl_shader
    /**
     * Deferred task of glCompileShader.  We should extend the mutex, not only
     * to protect the deferred task, but to protect the entire gl_shader.
+    *
+    * MUST BE LAST FOR SHADER CACHE TO WORK
     */
    mtx_t Mutex;
    struct _mesa_threadpool_task *Task;
@@ -2781,6 +2783,8 @@ struct gl_shader_program
     * Deferred task of glLinkProgram.  We should extend the mutex, not only
     * to protect the deferred task, but to protect the entire
     * gl_shader_program.
+    *
+    * MUST BE LAST FOR SHADER CACHE TO WORK
     */
    mtx_t Mutex;
    struct _mesa_threadpool_task *Task;
@@ -3527,6 +3531,10 @@ struct gl_constants
     */
    GLboolean DeferCompileShader;
    GLboolean DeferLinkProgram;
+
+   /* The following is used to limit both program and shader cache sizes */
+   /* If set to 0, it will disable caching */
+   GLuint MaxShaderCacheSize;
 };
 
 
@@ -4303,10 +4311,14 @@ struct gl_context
    struct _mesa_threadpool *ThreadPool;
 
    /**
-    * Binary shader cache disk location.
+    * Binary shader cache disk location, activity, and maximum size.
     */
-   char *BinaryCachePath;
-   GLboolean BinaryCacheActive;
+   char *BinaryShaderCachePath;
+   char *BinaryProgramCachePath;
+   GLboolean BinaryShaderCacheActive;
+   GLboolean BinaryProgramCacheActive;
+
+
 };
 
 

@@ -1082,6 +1082,7 @@ intel_init_bufmgr(struct intel_screen *intelScreen)
       return false;
    }
 
+   drm_intel_bufmgr_gem_set_vma_cache_size(intelScreen->bufmgr, 512);
    drm_intel_bufmgr_gem_enable_fenced_relocs(intelScreen->bufmgr);
 
    if (!intel_get_boolean(spriv, I915_PARAM_HAS_RELAXED_DELTA)) {

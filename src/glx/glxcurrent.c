@@ -253,11 +253,9 @@ MakeContextCurrent(Display * dpy, GLXDrawable draw,
          return GL_FALSE;
       }
 
-      if (gc->thread_refcount == 0) {
-         gc->currentDpy = dpy;
-         gc->currentDrawable = draw;
-         gc->currentReadable = read;
-      }
+      gc->currentDpy = dpy;
+      gc->currentDrawable = draw;
+      gc->currentReadable = read;
       gc->thread_refcount++;
       __glXSetCurrentContext(gc);
    } else {

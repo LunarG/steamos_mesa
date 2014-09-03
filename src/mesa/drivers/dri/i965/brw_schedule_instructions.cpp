@@ -1553,7 +1553,11 @@ fs_instruction_scheduler::choose_instruction_to_schedule_bu()
 
       const float pressure_reduction = get_register_pressure_benefit(inst, true);
 
-      const float lifetime_factor    = clamp01((v->virtual_grf_end[inst->dst.reg] - v->virtual_grf_start[inst->dst.reg]) / 200.0f);
+      if (inst->dst.file == GRF)
+         assert(inst->dst.reg < v->virtual_grf_count);
+
+      const float lifetime_factor    = (inst->dst.file == GRF) ?
+         clamp01((v->virtual_grf_end[inst->dst.reg] - v->virtual_grf_start[inst->dst.reg]) / 200.0f) : 0.0f;
       const float pressure_factor    = clamp01(pressure_reduction / 4.0f);
       const float delay_factor       = clamp01((n->delay - first->delay) / 100.0f);
       const float parent_factor      = clamp01(n->parent_count / 20.0f);

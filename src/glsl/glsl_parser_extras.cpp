@@ -231,7 +231,7 @@ bool _mesa_use_glass(struct gl_context *ctx)
 {
    // Force LunarGlass on
    if (ctx->Const.GlassMode == DRI_CONF_GLASS_MODE_ALWAYS ||
-       (ctx->_Shader && ctx->_Shader->Flags & GLSL_USE_GLASS))
+       (ctx->GlslFlags & GLSL_USE_GLASS))
       return true;
 
    // Force LunarGlass off

@@ -1144,6 +1144,8 @@ _mesa_initialize_context(struct gl_context *ctx,
 
    ctx->FirstTimeCurrent = GL_TRUE;
 
+   ctx->GlslFlags =_mesa_get_shader_flags();
+
    return GL_TRUE;
 
 fail:
@@ -1951,7 +1953,7 @@ _mesa_valid_to_render(struct gl_context *ctx, const char *where)
    }
 
 #ifdef DEBUG
-   if (ctx->_Shader->Flags & GLSL_LOG) {
+   if (ctx->GlslFlags & GLSL_LOG) {
       struct gl_shader_program **shProg = ctx->_Shader->CurrentProgram;
       gl_shader_stage i;
 

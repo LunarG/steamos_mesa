@@ -79,7 +79,6 @@ _mesa_new_pipeline_object(struct gl_context *ctx, GLuint name)
       obj->Name = name;
       mtx_init(&obj->Mutex, mtx_plain);
       obj->RefCount = 1;
-      obj->Flags = _mesa_get_shader_flags();
       obj->InfoLog = NULL;
    }
 

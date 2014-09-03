@@ -124,8 +124,6 @@ _mesa_init_shader_state(struct gl_context *ctx)
    for (sh = 0; sh < MESA_SHADER_STAGES; ++sh)
       memcpy(&ctx->ShaderCompilerOptions[sh], &options, sizeof(options));
 
-   ctx->Shader.Flags = _mesa_get_shader_flags();
-
    /* Extended for ARB_separate_shader_objects */
    ctx->Shader.RefCount = 1;
    mtx_init(&ctx->Shader.Mutex, mtx_plain);
@@ -826,7 +824,7 @@ can_queue_task(struct gl_context *ctx)
       return false;
 
    /* MESA_GLSL is set */
-   if (ctx->_Shader->Flags)
+   if (ctx->GlslFlags)
       return false;
 
    /* context requires synchronized compiler warnings and errors */
@@ -886,7 +884,7 @@ compile_shader(struct gl_context *ctx, GLuint shaderObj)
        */
       sh->CompileStatus = GL_FALSE;
    } else {
-      if (ctx->_Shader->Flags & GLSL_DUMP) {
+      if (ctx->GlslFlags & GLSL_DUMP) {
          fprintf(stderr, "GLSL source for %s shader %d:\n",
                  _mesa_shader_stage_to_string(sh->Stage), sh->Name);
          fprintf(stderr, "%s\n", sh->Source);
@@ -900,11 +898,11 @@ compile_shader(struct gl_context *ctx, GLuint shaderObj)
       if (!queue_compile_shader(ctx, sh))
          _mesa_glsl_compile_shader(ctx, sh, false, false);
 
-      if (ctx->_Shader->Flags & GLSL_LOG) {
+      if (ctx->GlslFlags & GLSL_LOG) {
          _mesa_write_shader_to_file(sh);
       }
 
-      if (ctx->_Shader->Flags & GLSL_DUMP) {
+      if (ctx->GlslFlags & GLSL_DUMP) {
          if (sh->CompileStatus) {
             fprintf(stderr, "GLSL IR for shader %d:\n", sh->Name);
             _mesa_print_ir(stderr, sh->ir, NULL);
@@ -921,8 +919,8 @@ compile_shader(struct gl_context *ctx, GLuint shaderObj)
 
    }
 
-   if (ctx->_Shader->Flags && !sh->CompileStatus) {
-      if (ctx->_Shader->Flags & GLSL_DUMP_ON_ERROR) {
+   if (ctx->GlslFlags && !sh->CompileStatus) {
+      if (ctx->GlslFlags & GLSL_DUMP_ON_ERROR) {
          fprintf(stderr, "GLSL source for %s shader %d:\n",
                  _mesa_shader_stage_to_string(sh->Stage), sh->Name);
          fprintf(stderr, "%s\n", sh->Source);
@@ -930,7 +928,7 @@ compile_shader(struct gl_context *ctx, GLuint shaderObj)
          fflush(stderr);
       }
 
-      if (ctx->_Shader->Flags & GLSL_REPORT_ERRORS) {
+      if (ctx->GlslFlags & GLSL_REPORT_ERRORS) {
          _mesa_debug(ctx, "Error compiling shader %u:\n%s\n",
                      sh->Name, sh->InfoLog);
       }
@@ -1014,7 +1012,7 @@ link_program(struct gl_context *ctx, GLuint program)
       _mesa_glsl_link_shader(ctx, shProg);
    }
 
-   if ((ctx->_Shader->Flags & GLSL_REPORT_ERRORS) &&
+   if ((ctx->GlslFlags & GLSL_REPORT_ERRORS) &&
        shProg->LinkStatus == GL_FALSE) {
       _mesa_debug(ctx, "Error linking program %u:\n%s\n",
                   shProg->Name, shProg->InfoLog);
@@ -1637,7 +1635,7 @@ _mesa_UseProgram(GLhandleARB program)
       }
 
       /* debug code */
-      if (ctx->_Shader->Flags & GLSL_USE_PROG) {
+      if (ctx->GlslFlags & GLSL_USE_PROG) {
          print_shader_info(shProg);
       }
    }

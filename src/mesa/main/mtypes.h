@@ -2835,8 +2835,6 @@ struct gl_pipeline_object
     */
    struct gl_shader_program *ActiveProgram;
 
-   GLbitfield Flags;                    /**< Mask of GLSL_x flags */
-
    GLboolean EverBound;                 /**< Has the pipeline object been created */
 
    GLboolean Validated;                 /**< Pipeline Validation status */
@@ -4306,6 +4304,8 @@ struct gl_context
     * Once this field becomes true, it is never reset to false.
     */
    GLboolean ShareGroupReset;
+
+   GLbitfield GlslFlags;                    /**< Mask of GLSL_x flags */
 
    /* A thread pool for threaded shader compilation */
    struct _mesa_threadpool *ThreadPool;

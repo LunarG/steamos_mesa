@@ -5265,7 +5265,7 @@ _st_ir_get_program(struct gl_context *ctx,
    /* Write the END instruction. */
    v->emit(NULL, TGSI_OPCODE_END);
 
-   if (ctx->_Shader->Flags & GLSL_DUMP) {
+   if (ctx->GlslFlags & GLSL_DUMP) {
       printf("\n");
       printf("GLSL IR for linked %s program %d:\n",
              _mesa_shader_stage_to_string(shader->Stage),

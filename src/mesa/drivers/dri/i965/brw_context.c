@@ -583,8 +583,27 @@ brw_process_driconf_options(struct brw_context *brw)
       driQueryOptionb(&brw->optionCache, "glass_enable_reassociation");
 
 
-   const int multithread_glsl_compiler =
+   int multithread_glsl_compiler =
       driQueryOptioni(options, "multithread_glsl_compiler");
+
+   int max_shader_cache_size = 0;
+   max_shader_cache_size = driQueryOptioni(options, "max_shader_cache_size");
+   if (max_shader_cache_size != 0)
+      ctx->Const.MaxShaderCacheSize = (unsigned) max_shader_cache_size;
+
+   if (brw->gen != 7 && brw->gen != 6) {
+      ctx->Const.GlassMode = ctx->Const.GlassEnableReassociation = multithread_glsl_compiler = 0;
+      ctx->Const.MaxShaderCacheSize = 0;
+   }
+
+   if  (ctx->Const.GlassMode && strstr(program_invocation_short_name,"hl2_linux")) {
+      char exe_path[PATH_MAX];
+      readlink("/proc/self/exe",exe_path,PATH_MAX);
+      if (!strstr(exe_path,"Left\ 4\ Dead\ 2")) {
+         ctx->Const.GlassMode = ctx->Const.GlassEnableReassociation = 0;
+      }
+   }
+
    if (multithread_glsl_compiler > 0) {
       const int max_threads = (multithread_glsl_compiler > 1) ?
          multithread_glsl_compiler : 2;
@@ -593,12 +612,6 @@ brw_process_driconf_options(struct brw_context *brw)
       ctx->Const.DeferCompileShader = GL_TRUE;
       ctx->Const.DeferLinkProgram = GL_TRUE;
    }
-
-
-   int max_shader_cache_size = 0;
-   max_shader_cache_size = driQueryOptioni(options, "max_shader_cache_size");
-   if (max_shader_cache_size != 0)
-      ctx->Const.MaxShaderCacheSize = (unsigned) max_shader_cache_size;
 
    mesa_program_diskcache_init(ctx);
    mesa_shader_diskcache_init(ctx);

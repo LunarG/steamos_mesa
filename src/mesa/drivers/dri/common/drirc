@@ -73,5 +73,21 @@ TODO: document the other workarounds.
         <application name="Topogun (64-bit)" executable="topogun64">
             <option name="always_have_depth_buffer" value="true" />
         </application>
+    </device
+
+    <device driver="i965">
+        <application name="Dota 2" executable="dota_linux">
+            <option name="glass_mode" value="2" />
+            <option name="glass_enable_reassociation" value="false" />
+        </application>
+
+        <application name="Counter Strike GO" executable="csgo_linux">
+            <option name="glass_mode" value="2" />
+        </application>
+
+        <application name="Left 4 Dead 2" executable="hl2_linux">
+            <option name="glass_mode" value="2" />
+        </application>
     </device>
+
 </driconf>

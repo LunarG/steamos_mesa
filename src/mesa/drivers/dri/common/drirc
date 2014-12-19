@@ -73,7 +73,7 @@ TODO: document the other workarounds.
         <application name="Topogun (64-bit)" executable="topogun64">
             <option name="always_have_depth_buffer" value="true" />
         </application>
-    </device
+    </device>
 
     <device driver="i965">
         <application name="Dota 2" executable="dota_linux">
